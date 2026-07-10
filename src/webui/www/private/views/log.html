@@ -245,11 +245,16 @@
         };
 
         const syncLogWithInterval = (interval) => {
+            if (window.qBittorrent.Client.isUIUpdatesPaused())
+                return;
             if (!tableInfo[currentSelectedTab].progress) {
                 clearTimeout(tableInfo[currentSelectedTab].timer);
                 tableInfo[currentSelectedTab].timer = syncLogData.delay(interval, null, currentSelectedTab);
             }
         };
+        window.addEventListener("qbt-updates-resumed", () => {
+            syncLogWithInterval(100);
+        });
 
         const getFilterText = () => {
             return inputtedFilterText;

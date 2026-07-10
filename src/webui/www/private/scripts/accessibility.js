@@ -286,41 +286,64 @@ window.qBittorrent.Accessibility ??= (() => {
         });
     };
 
-    /* ---------- main window tabs ---------- */
+    /* ---------- tab strips (main window, properties panel, log view) ---------- */
 
-    const setupTabs = () => {
-        const list = document.getElementById("mainWindowTabsList");
-        if (list === null)
-            return;
-        list.setAttribute("role", "tablist");
-        list.setAttribute("aria-label", "Main window tabs");
+    const setupTablist = (listId, label) => {
+        applyWhenPresent(listId, (list) => {
+            list.setAttribute("role", "tablist");
+            list.setAttribute("aria-label", label);
 
-        const tabAnchors = () => [...list.querySelectorAll("li > a")]
-            .filter((a) => a.closest("li").offsetParent !== null);
+            const tabAnchors = () => [...list.querySelectorAll("li > a")]
+                .filter((a) => a.closest("li").offsetParent !== null);
 
-        const sync = () => {
-            for (const a of list.querySelectorAll("li > a")) {
-                const selected = a.closest("li").classList.contains("selected");
-                a.setAttribute("role", "tab");
-                a.setAttribute("aria-selected", selected ? "true" : "false");
-                a.tabIndex = selected ? 0 : -1;
-            }
-        };
-        sync();
-        new MutationObserver(sync).observe(list, { attributes: true, attributeFilter: ["class"], subtree: true });
+            const sync = () => {
+                for (const a of list.querySelectorAll("li > a")) {
+                    const selected = a.closest("li").classList.contains("selected");
+                    a.setAttribute("role", "tab");
+                    a.setAttribute("aria-selected", selected ? "true" : "false");
+                    a.tabIndex = selected ? 0 : -1;
+                }
+            };
+            sync();
+            new MutationObserver(sync).observe(list, { attributes: true, attributeFilter: ["class"], subtree: true });
 
-        list.addEventListener("keydown", (e) => {
-            if ((e.key !== "ArrowRight") && (e.key !== "ArrowLeft"))
-                return;
-            const anchors = tabAnchors();
-            const index = anchors.indexOf(e.target);
-            if (index === -1)
-                return;
-            e.preventDefault();
-            const next = anchors[(index + ((e.key === "ArrowRight") ? 1 : -1) + anchors.length) % anchors.length];
-            next.focus();
-            next.click();
+            list.addEventListener("keydown", (e) => {
+                if ((e.key !== "ArrowRight") && (e.key !== "ArrowLeft"))
+                    return;
+                const anchors = tabAnchors();
+                const index = anchors.indexOf(e.target);
+                if (index === -1)
+                    return;
+                e.preventDefault();
+                const next = anchors[(index + ((e.key === "ArrowRight") ? 1 : -1) + anchors.length) % anchors.length];
+                next.focus();
+                next.click();
+            });
         });
+    };
+
+    /* ---------- pause auto-updates (WCAG 2.2.2) ---------- */
+
+    const setupPauseToggle = () => {
+        const button = document.createElement("button");
+        button.id = "a11yPauseUpdatesButton";
+        button.type = "button";
+        button.setAttribute("aria-pressed", "false");
+        button.setAttribute("aria-label", "Pause list updates");
+        const img = document.createElement("img");
+        img.src = "images/pause-session.svg";
+        img.alt = "";
+        img.width = 24;
+        img.height = 24;
+        button.append(img);
+        button.addEventListener("click", () => {
+            const paused = !window.qBittorrent.Client.isUIUpdatesPaused();
+            window.qBittorrent.Client.setUIUpdatesPaused(paused);
+            button.setAttribute("aria-pressed", paused ? "true" : "false");
+            button.setAttribute("aria-label", paused ? "Resume list updates" : "Pause list updates");
+            announce(paused ? "List updates paused" : "List updates resumed");
+        });
+        document.getElementById("preferencesButton")?.after(button);
     };
 
     /* ---------- MochaUI window (dialog) management ---------- */
@@ -468,7 +491,10 @@ window.qBittorrent.Accessibility ??= (() => {
         labelToolbarButtons();
         stripDecorativeAltText();
         setupMenubar();
-        setupTabs();
+        setupTablist("mainWindowTabsList", "Main window tabs");
+        setupTablist("propertiesTabs", "Torrent details tabs");
+        setupTablist("panelTabs", "Log tabs");
+        setupPauseToggle();
         setupDialogManager();
         setupActionAnnouncements();
         setupSkipLink();

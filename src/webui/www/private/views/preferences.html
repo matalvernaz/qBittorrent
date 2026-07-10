@@ -1919,16 +1919,16 @@ Use ';' to split multiple entries. Can use wildcard '*'.)QBT_TR[CONTEXT=OptionsD
 
         const addWatchFolder = (folder = "", sel = "default_folder", other = "") => {
             const pos = document.getElementById("watched_folders_tab").getChildren("tbody")[0].getChildren("tr").length;
-            const myinput = `<input id='text_watch_${pos}' type='text' value='${folder}'>`;
+            const myinput = `<input id='text_watch_${pos}' type='text' value='${folder}' aria-label='Monitored folder path'>`;
             const disableInput = (sel !== "other");
             const mycb = "<div class='select-watched-folder-editable'>"
-                + `<select id ='cb_watch_${pos}' onchange='qBittorrent.Preferences.changeWatchFolderSelect(this);'>`
+                + `<select id ='cb_watch_${pos}' aria-label='Save files to' onchange='qBittorrent.Preferences.changeWatchFolderSelect(this);'>`
                 + "<option value='watch_folder'>QBT_TR(Monitored folder)QBT_TR[CONTEXT=ScanFoldersModel]</option>"
                 + "<option value='default_folder'>QBT_TR(Default save location)QBT_TR[CONTEXT=ScanFoldersModel]</option>"
                 + "<option value='other'>QBT_TR(Other...)QBT_TR[CONTEXT=ScanFoldersModel]</option>"
                 + "</select>"
-                + `<input id='cb_watch_txt_${pos}' type='text' ${disableInput ? "hidden " : ""}/>`
-                + `<img src='images/list-add.svg' id='addFolderImg_${pos}' alt='Add' style='padding-left:170px;width:16px;cursor:pointer;' onclick='qBittorrent.Preferences.addWatchFolder();'>`
+                + `<input id='cb_watch_txt_${pos}' type='text' aria-label='Custom save location' ${disableInput ? "hidden " : ""}/>`
+                + `<img src='images/list-add.svg' id='addFolderImg_${pos}' alt='Add monitored folder' role='button' tabindex='0' style='padding-left:170px;width:16px;cursor:pointer;' onclick='qBittorrent.Preferences.addWatchFolder();' onkeydown='if (event.key === "Enter") qBittorrent.Preferences.addWatchFolder();'>`
                 + "</div>";
 
             watchedFoldersTable.push([myinput, mycb]);
