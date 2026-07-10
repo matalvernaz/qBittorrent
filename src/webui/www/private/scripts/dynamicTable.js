@@ -186,14 +186,50 @@ window.qBittorrent.DynamicTable ??= (() => {
                 switch (e.key) {
                     case "ArrowUp":
                         e.preventDefault();
-                        this.selectPreviousRow();
-                        this.dynamicTableDiv.querySelector(".selected").scrollIntoView({ block: "nearest" });
+                        if (e.shiftKey)
+                            this.extendSelectionFrom(tr, -1);
+                        else
+                            this.selectPreviousRow();
+                        this.dynamicTableDiv.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
                         break;
 
                     case "ArrowDown":
                         e.preventDefault();
-                        this.selectNextRow();
-                        this.dynamicTableDiv.querySelector(".selected").scrollIntoView({ block: "nearest" });
+                        if (e.shiftKey)
+                            this.extendSelectionFrom(tr, 1);
+                        else
+                            this.selectNextRow();
+                        this.dynamicTableDiv.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
+                        break;
+
+                    case "Home":
+                        e.preventDefault();
+                        this.selectEdgeRow(true);
+                        break;
+
+                    case "End":
+                        e.preventDefault();
+                        this.selectEdgeRow(false);
+                        break;
+
+                    case " ":
+                        e.preventDefault();
+                        if (this.isRowSelected(tr.rowId))
+                            this.deselectRow(tr.rowId);
+                        else
+                            this.selectRow(tr.rowId);
+                        break;
+
+                    case "ContextMenu":
+                        e.preventDefault();
+                        this.openContextMenuAt(tr);
+                        break;
+
+                    case "F10":
+                        if (e.shiftKey) {
+                            e.preventDefault();
+                            this.openContextMenuAt(tr);
+                        }
                         break;
                 }
             });
@@ -796,8 +832,12 @@ window.qBittorrent.DynamicTable ??= (() => {
         }
 
         setRowClass() {
-            for (const tr of this.getTrs())
-                tr.classList.toggle("selected", this.isRowSelected(tr.rowId));
+            for (const tr of this.getTrs()) {
+                const selected = this.isRowSelected(tr.rowId);
+                tr.classList.toggle("selected", selected);
+                if (this.a11yRowRole)
+                    tr.setAttribute("aria-selected", selected ? "true" : "false");
+            }
         }
 
         onSelectedRowChanged() {}
@@ -975,6 +1015,12 @@ window.qBittorrent.DynamicTable ??= (() => {
                     this.updateRowElement(element, row.rowId, offset);
                 else
                     element = this.cachedElements[position] = this.createRowElement(row, offset);
+                if (this.a11yRowRole) {
+                    // expose true position within the filtered set; only a
+                    // window of rows exists in the DOM at any time
+                    element.setAttribute("aria-posinset", i + 1);
+                    element.setAttribute("aria-setsize", rows.length);
+                }
                 elements.push(element);
             }
             const hadFocus = this.dynamicTableDiv.contains(document.activeElement);
@@ -997,6 +1043,8 @@ window.qBittorrent.DynamicTable ??= (() => {
             // set tabindex so element receives keydown events
             // more info: https://developer.mozilla.org/en-US/docs/Web/API/Element/keydown_event
             tr.tabIndex = -1;
+            if (this.a11yRowRole)
+                tr.setAttribute("role", this.a11yRowRole);
 
             for (let k = 0; k < this.columns.length; ++k) {
                 const td = document.createElement("td");
@@ -1043,6 +1091,11 @@ window.qBittorrent.DynamicTable ??= (() => {
                 if (this.columns[i].dataProperties.some(prop => Object.hasOwn(data, prop)))
                     this.columns[i].updateTd(tds[i], row);
             }
+
+            const ariaLabel = this.getRowAriaLabel(tr, row);
+            if (ariaLabel !== null)
+                tr.setAttribute("aria-label", ariaLabel);
+
             row.data = {};
         }
 
@@ -1119,6 +1172,47 @@ window.qBittorrent.DynamicTable ??= (() => {
                 newRow.focus({ preventScroll: true });
             }
         }
+
+        // screen-reader label for a row; tables opt in by overriding
+        getRowAriaLabel(tr, row) {
+            return null;
+        }
+
+        // add the row adjacent to `tr` to the selection (Shift+Arrow)
+        extendSelectionFrom(tr, direction) {
+            const visibleRows = Array.prototype.filter.call(this.getTrs(), (row => !row.classList.contains("invisible") && (row.style.display !== "none")));
+            const index = visibleRows.indexOf(tr);
+            const target = visibleRows[index + direction];
+            if (target === undefined)
+                return;
+            this.selectRow(target.getAttribute("data-row-id"));
+            target.focus({ preventScroll: true });
+        }
+
+        // jump to the first/last row of the filtered set (Home/End); the
+        // target row may not be rendered yet, so scroll and let rerender()
+        // restore focus to the newly selected row
+        selectEdgeRow(first) {
+            const rows = this.getFilteredAndSortedRows();
+            if (rows.length === 0)
+                return;
+            const row = rows[first ? 0 : (rows.length - 1)];
+            this.deselectAll();
+            this.selectRow(row.rowId);
+            this.dynamicTableDiv.scrollTop = first ? 0 : this.dynamicTableDiv.scrollHeight;
+            this.getTrByRowId(row.rowId)?.focus({ preventScroll: true });
+        }
+
+        // open the row's context menu via keyboard (ContextMenu key, Shift+F10)
+        openContextMenuAt(tr) {
+            const rect = tr.getBoundingClientRect();
+            tr.dispatchEvent(new MouseEvent("contextmenu", {
+                bubbles: true,
+                cancelable: true,
+                clientX: rect.left + Math.min(40, (rect.width / 2)),
+                clientY: rect.top + (rect.height / 2),
+            }));
+        }
     }
 
     class TorrentsTable extends DynamicTable {
@@ -1127,7 +1221,37 @@ window.qBittorrent.DynamicTable ??= (() => {
             this.rowHeight = (clientData.get("display_density") === "compact") ? 18 : 22;
         }
 
+        getRowAriaLabel(tr, row) {
+            const data = row.full_data;
+            if ((data === undefined) || (data.name === undefined))
+                return null;
+
+            const cells = this.getRowCells(tr);
+            const statusIndex = this.columns.findIndex((column) => column.name === "status");
+            const status = (statusIndex === -1) ? "" : (cells[statusIndex]?.textContent.trim() ?? "");
+
+            const parts = [data.name];
+            if (status !== "")
+                parts.push(status);
+            if (data.progress !== undefined)
+                parts.push(`${Math.round(data.progress * 100)}%`);
+            if (data.dlspeed > 0)
+                parts.push(`down ${window.qBittorrent.Misc.friendlyUnit(data.dlspeed, true)}`);
+            if (data.upspeed > 0)
+                parts.push(`up ${window.qBittorrent.Misc.friendlyUnit(data.upspeed, true)}`);
+            if ((data.eta !== undefined) && (data.eta >= 0) && (data.eta < window.qBittorrent.Misc.MAX_ETA))
+                parts.push(`ETA ${window.qBittorrent.Misc.friendlyDuration(data.eta, window.qBittorrent.Misc.MAX_ETA)}`);
+            if (data.ratio !== undefined)
+                parts.push(`ratio ${(data.ratio === -1) ? "infinite" : data.ratio.toFixed(2)}`);
+
+            return parts.join(", ");
+        }
+
         initColumns() {
+            // rows are exposed to assistive tech as options of the listbox
+            // declared in views/transferlist.html
+            this.a11yRowRole = "option";
+
             this.newColumn("priority", "", "#", 30, true);
             this.newColumn("state_icon", "", "QBT_TR(Status Icon)QBT_TR[CONTEXT=TransferListModel]", 30, false);
             this.newColumn("name", "", "QBT_TR(Name)QBT_TR[CONTEXT=TransferListModel]", 200, true);

@@ -19,6 +19,7 @@
     <link rel="stylesheet" type="text/css" href="css/Layout.css?v=${CACHEID}">
     <link rel="stylesheet" type="text/css" href="css/Window.css?v=${CACHEID}">
     <link rel="stylesheet" type="text/css" href="css/Tabs.css?v=${CACHEID}">
+    <link rel="stylesheet" type="text/css" href="css/accessibility.css?v=${CACHEID}">
     <noscript>
         <link rel="stylesheet" type="text/css" href="css/noscript.css?v=${CACHEID}">
     </noscript>
@@ -45,12 +46,17 @@
     <script defer src="scripts/contextmenu.js?locale=${LANG}&v=${CACHEID}"></script>
     <script defer src="scripts/pathAutofill.js?v=${CACHEID}"></script>
     <script defer src="scripts/statistics.js?v=${CACHEID}"></script>
+    <script defer src="scripts/accessibility.js?v=${CACHEID}"></script>
 </head>
 
 <body>
     <noscript id="noscript">
         <h1>QBT_TR(JavaScript Required! You must enable JavaScript for the WebUI to work properly)QBT_TR[CONTEXT=HttpServer]</h1>
     </noscript>
+    <!-- plain text: a QBT_TR string this early in the document gets skipped by
+         translateDocument() — the in-loop ${CACHEID} replacements shift the
+         scan index past it -->
+    <a href="#" id="a11ySkipToTorrents" class="a11y-skip">Skip to torrent list</a>
     <div id="desktop">
         <div id="desktopHeader">
             <div id="desktopNavbar">
@@ -293,7 +299,7 @@
     </ul>
     <div id="desktopFooterWrapper">
         <div id="desktopFooter" style="overflow-x: auto; overflow-y: hidden;">
-            <span id="error_div"></span>
+            <span id="error_div" role="alert"></span>
             <table style="margin-right: 5px; margin-left: auto; width: max-content;">
                 <tbody>
                     <tr>

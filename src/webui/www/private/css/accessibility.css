@@ -1,0 +1,53 @@
+/* Accessibility layer: screen-reader utilities, visible keyboard focus,
+   and keyboard-driven equivalents of the :hover-only menu CSS. */
+
+/* Visually hidden but exposed to assistive technology */
+.a11y-sr-only {
+    border: 0;
+    clip-path: inset(50%);
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    padding: 0;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
+}
+
+/* Skip link: off-screen until keyboard-focused */
+.a11y-skip {
+    background-color: var(--color-background-default, #fff);
+    color: var(--color-text-default, #000);
+    left: -999em;
+    padding: 4px 8px;
+    position: absolute;
+    top: 4px;
+    z-index: 9000;
+}
+
+.a11y-skip:focus {
+    left: 4px;
+}
+
+/* style.css strips outlines globally; restore them for keyboard focus */
+#desktopNavbar a:focus-visible,
+#desktopNavbar div.anchor label:focus-visible,
+#mochaToolbar [role="button"]:focus-visible,
+.contextMenu li a:focus-visible,
+.dynamicTable tr:focus-visible,
+.tab-menu li a:focus-visible,
+.a11y-skip:focus-visible {
+    outline: 2px solid var(--color-accent-blue, #4a9eff) !important;
+    outline-offset: -2px;
+}
+
+/* Keyboard-opened menubar dropdowns: mirror `#desktopNavbar li:hover ul` */
+#desktopNavbar li.a11y-open > ul {
+    left: auto;
+}
+
+/* Keyboard-opened context-menu submenus:
+   mirror `.contextMenu li:not(.disabled):hover > ul` */
+.contextMenu li:not(.disabled):focus-within > ul {
+    left: auto;
+}
