@@ -1,13 +1,13 @@
 <div id="torrentsTableDiv" class="dynamicTableDiv">
-    <div id="torrentsTableFixedHeaderDiv" class="dynamicTableFixedHeaderDiv">
+    <div id="torrentsTableFixedHeaderDiv" class="dynamicTableFixedHeaderDiv" aria-hidden="true">
         <table class="dynamicTable unselectable" style="position:relative;">
             <thead>
                 <tr class="dynamicTableHeader"></tr>
             </thead>
         </table>
     </div>
-    <table class="dynamicTable unselectable">
-        <tbody></tbody>
+    <table class="dynamicTable unselectable" role="listbox" aria-multiselectable="true" aria-label="QBT_TR(Torrent list)QBT_TR[CONTEXT=TransferListWidget]">
+        <tbody role="presentation"></tbody>
     </table>
 </div>
 
