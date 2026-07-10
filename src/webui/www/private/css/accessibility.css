@@ -33,11 +33,13 @@
 #desktopNavbar a:focus-visible,
 #desktopNavbar div.anchor label:focus-visible,
 #mochaToolbar [role="button"]:focus-visible,
+#mochaToolbar button:focus-visible,
 .contextMenu li a:focus-visible,
 .dynamicTable tr:focus-visible,
+.dynamicTable th:focus-visible,
 .tab-menu li a:focus-visible,
 .a11y-skip:focus-visible {
-    outline: 2px solid var(--color-accent-blue, #4a9eff) !important;
+    outline: 2px solid var(--a11y-focus-color, #1a66cc) !important;
     outline-offset: -2px;
 }
 
@@ -50,4 +52,63 @@
    mirror `.contextMenu li:not(.disabled):hover > ul` */
 .contextMenu li:not(.disabled):focus-within > ul {
     left: auto;
+}
+
+/* WCAG 1.4.3 / 1.4.6 / 1.4.11 palette adjustments.
+   Every value verified against the surface it renders on;
+   measured contrast ratios in the comments. */
+:root {
+    --color-text-default: hsl(0deg 0% 28%);       /* 8.08:1 on 94% bg — AAA */
+    --color-text-blue: hsl(210deg 100% 38%);      /* 5.28:1 */
+    --color-text-red: hsl(0deg 100% 38%);         /* 5.59:1 */
+    --color-text-orange: hsl(26deg 100% 34%);     /* 4.84:1 */
+    --color-text-green: hsl(110deg 94% 24%);      /* 5.02:1 */
+    --color-background-hover: hsl(26deg 85% 40%); /* white text 4.53:1 */
+    --color-background-blue: hsl(210deg 65% 40%); /* white text 5.93:1 */
+    --a11y-focus-color: hsl(210deg 100% 35%);     /* ≥3:1 on all light surfaces */
+
+    & #torrentTrackersTableDiv tr {
+        --color-tracker-disabled: hsl(240deg 4% 40%);       /* 6.05:1 */
+        --color-tracker-not-contacted: hsl(32deg 95% 33%);  /* 5.21:1 */
+        --color-tracker-working: hsl(142deg 76% 24%);       /* 6.57:1 */
+        --color-tracker-updating: hsl(210deg 100% 38%);     /* 6.03:1 */
+        --color-tracker-not-working: hsl(0deg 100% 38%);    /* 6.39:1 */
+    }
+}
+
+:root.dark {
+    --color-text-red: hsl(0deg 100% 79%);         /* 4.91:1 on 25% bg */
+    --color-text-green: hsl(142deg 69% 58%);      /* 5.96:1 */
+    --color-background-hover: hsl(26deg 55% 38%); /* white text 5.54:1 */
+    --color-background-blue: hsl(210deg 50% 34%); /* white text 7.55:1 */
+    --a11y-focus-color: hsl(210deg 88% 73.5%);    /* ≥5:1 on all dark surfaces */
+    /* dark tracker-state colors already measure 5.96–7.05:1; unchanged */
+}
+
+/* row hover pairs the hover background with default (dark) text upstream;
+   force white to keep the hover state readable (4.53:1 light, 5.54:1 dark) */
+.dynamicTableDiv table.dynamicTable tbody tr:hover {
+    color: var(--color-text-white);
+}
+
+/* WCAG 2.5.8: minimum 24px hit targets for menu rows */
+.contextMenu li a,
+#desktopNavbar li ul li a,
+#desktopNavbar li ul li div.anchor {
+    box-sizing: border-box;
+    min-height: 24px;
+}
+
+/* WCAG 2.4.11: keep the focused row clear of the pane edges */
+.dynamicTable tr {
+    scroll-margin-bottom: 4px;
+    scroll-margin-top: 4px;
+}
+
+#a11yPauseUpdatesButton {
+    background: none;
+    border: 0;
+    cursor: pointer;
+    padding: 0 4px;
+    vertical-align: middle;
 }
