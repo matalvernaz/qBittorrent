@@ -37,6 +37,8 @@ window.qBittorrent.Client ??= (() => {
             getSyncMainDataInterval: getSyncMainDataInterval,
             isStopped: isStopped,
             stop: stop,
+            isUIUpdatesPaused: isUIUpdatesPaused,
+            setUIUpdatesPaused: setUIUpdatesPaused,
             mainTitle: mainTitle,
             showSearchEngine: showSearchEngine,
             showRssReader: showRssReader,
@@ -130,6 +132,21 @@ window.qBittorrent.Client ??= (() => {
     let stopped = false;
     const isStopped = () => {
         return stopped;
+    };
+
+    // WCAG 2.2.2: user-controlled pause for the auto-updating UI
+    let uiUpdatesPaused = false;
+    const isUIUpdatesPaused = () => {
+        return uiUpdatesPaused;
+    };
+
+    const setUIUpdatesPaused = (paused) => {
+        uiUpdatesPaused = paused;
+        if (!paused) {
+            // views with their own timers listen for this to reschedule
+            window.dispatchEvent(new CustomEvent("qbt-updates-resumed"));
+            window.updateMainData();
+        }
     };
 
     const stop = () => {
@@ -1226,6 +1243,9 @@ window.addEventListener("DOMContentLoaded", async (event) => {
         syncMainDataTimeoutID = -1;
 
         if (window.qBittorrent.Client.isStopped())
+            return;
+
+        if (window.qBittorrent.Client.isUIUpdatesPaused())
             return;
 
         syncMainDataTimeoutID = syncMainData.delay(delay);
