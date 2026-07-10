@@ -74,6 +74,86 @@ window.qBittorrent.ContextMenu ??= (() => {
             this.menu.style.position = "absolute";
             this.menu.style.top = "-900000px";
             this.menu.style.display = "block";
+
+            this.applyAccessibilityRoles();
+            this.setupKeyboardNavigation();
+        }
+
+        applyAccessibilityRoles() {
+            this.menu.setAttribute("role", "menu");
+            for (const li of this.menu.querySelectorAll("li"))
+                li.setAttribute("role", "none");
+            for (const anchor of this.menu.querySelectorAll("li > a")) {
+                // don't clobber menuitemcheckbox set by setItemChecked
+                if (!anchor.hasAttribute("role"))
+                    anchor.setAttribute("role", "menuitem");
+                anchor.tabIndex = -1;
+            }
+            for (const submenu of this.menu.querySelectorAll("li ul"))
+                submenu.setAttribute("role", "menu");
+            for (const anchor of this.menu.querySelectorAll("a.arrow-right"))
+                anchor.setAttribute("aria-haspopup", "true");
+        }
+
+        visibleItemsOf(list) {
+            return [...list.querySelectorAll(":scope > li > a")].filter((anchor) => {
+                const li = anchor.closest("li");
+                return (li.offsetParent !== null) && !li.classList.contains("disabled");
+            });
+        }
+
+        focusFirstItem() {
+            window.requestAnimationFrame(() => {
+                this.visibleItemsOf(this.menu)[0]?.focus();
+            });
+        }
+
+        setupKeyboardNavigation() {
+            this.menu.addEventListener("keydown", (e) => {
+                if (!(e.target instanceof HTMLAnchorElement))
+                    return;
+                const anchor = e.target;
+                const list = anchor.closest("ul");
+                const items = this.visibleItemsOf(list);
+                const index = items.indexOf(anchor);
+
+                switch (e.key) {
+                    case "ArrowDown":
+                        e.preventDefault();
+                        e.stopPropagation();
+                        items[(index + 1) % items.length]?.focus();
+                        break;
+                    case "ArrowUp":
+                        e.preventDefault();
+                        e.stopPropagation();
+                        items[(index - 1 + items.length) % items.length]?.focus();
+                        break;
+                    case "ArrowRight": {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        // parent anchor keeps :focus-within on its li, which
+                        // makes the submenu visible and thus focusable
+                        const submenu = anchor.parentNode.querySelector("ul");
+                        if (submenu !== null)
+                            this.visibleItemsOf(submenu)[0]?.focus();
+                        break;
+                    }
+                    case "ArrowLeft":
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (list !== this.menu)
+                            list.closest("li")?.querySelector(":scope > a")?.focus();
+                        break;
+                    case "Escape":
+                        e.preventDefault();
+                        e.stopPropagation();
+                        this.hide();
+                        break;
+                    case "Tab":
+                        this.hide();
+                        break;
+                }
+            });
         }
 
         adjustMenuPosition(e) {
@@ -234,24 +314,34 @@ window.qBittorrent.ContextMenu ??= (() => {
         show(trigger) {
             if (lastShownContextMenu && (lastShownContextMenu !== this))
                 lastShownContextMenu.hide();
+            this.a11yReturnFocus = document.activeElement;
             this.menu.classList.add("visible");
             this.options.onShow.call(this);
+            // categories/tags submenus are rebuilt on every show
+            this.applyAccessibilityRoles();
+            this.focusFirstItem();
             lastShownContextMenu = this;
             return this;
         }
 
         // hide the menu
         hide(trigger) {
+            const hadFocus = this.menu.contains(document.activeElement);
             if (lastShownContextMenu && (lastShownContextMenu.menu.style.visibility !== "hidden")) {
                 this.menu.classList.remove("visible");
                 this.options.onHide.call(this);
             }
+            if (hadFocus && this.a11yReturnFocus?.isConnected)
+                this.a11yReturnFocus.focus();
             return this;
         }
 
         setItemChecked(item, checked) {
-            this.menu.querySelector(`a[href$="${item}"]`).firstElementChild.style.opacity =
-                checked ? "1" : "0";
+            const anchor = this.menu.querySelector(`a[href$="${item}"]`);
+            anchor.firstElementChild.style.opacity = checked ? "1" : "0";
+            // the opacity-toggled icon is invisible to screen readers
+            anchor.setAttribute("role", "menuitemcheckbox");
+            anchor.setAttribute("aria-checked", checked ? "true" : "false");
             return this;
         }
 
