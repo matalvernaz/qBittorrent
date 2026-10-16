@@ -650,9 +650,6 @@ window.addEventListener("DOMContentLoaded", async (event) => {
         if (!categoryList)
             return;
 
-        for (const el of [...categoryList.children])
-            el.remove();
-
         const categoryItemTemplate = document.getElementById("categoryFilterItem");
 
         const createLink = (category, text, count) => {
@@ -742,10 +739,23 @@ window.addEventListener("DOMContentLoaded", async (event) => {
                 }
             }
         }
+        // Rebuilding destroys keyboard focus inside the list (accessibility.js
+        // makes it a listbox), so only rebuild when names or counts changed.
+        // Collapse state lives in the existing DOM; selection is reapplied.
+        const signature = JSON.stringify([torrentsTable.getRowSize(), uncategorized, sortedCategories.map(({ categoryName, categoryCount }) => [categoryName, categoryCount])]);
+        if (categoryList.a11ySignature === signature) {
+            highlightSelectedCategory();
+            return;
+        }
+        categoryList.a11ySignature = signature;
+
         for (const category of sortedCategories) {
             if (category.isRoot)
                 createCategoryTree(category);
         }
+
+        for (const el of [...categoryList.children])
+            el.remove();
 
         categoryList.appendChild(categoriesFragment);
         window.qBittorrent.Filters.categoriesFilterContextMenu.searchAndAddTargets();
@@ -764,9 +774,6 @@ window.addEventListener("DOMContentLoaded", async (event) => {
         const tagFilterList = document.getElementById("tagFilterList");
         if (tagFilterList === null)
             return;
-
-        for (const el of [...tagFilterList.children])
-            el.remove();
 
         const tagItemTemplate = document.getElementById("tagFilterItem");
 
@@ -787,9 +794,6 @@ window.addEventListener("DOMContentLoaded", async (event) => {
                 untagged += 1;
         }
 
-        tagFilterList.appendChild(createLink(TAGS_ALL, "QBT_TR(All)QBT_TR[CONTEXT=TagFilterModel]", torrentsTable.getRowSize()));
-        tagFilterList.appendChild(createLink(TAGS_UNTAGGED, "QBT_TR(Untagged)QBT_TR[CONTEXT=TagFilterModel]", untagged));
-
         const sortedTags = [];
         for (const [tag, torrents] of window.qBittorrent.Client.tagMap) {
             sortedTags.push({
@@ -798,6 +802,22 @@ window.addEventListener("DOMContentLoaded", async (event) => {
             });
         }
         sortedTags.sort((left, right) => window.qBittorrent.Misc.naturalSortCollator.compare(left.tagName, right.tagName));
+
+        // Rebuilding destroys keyboard focus inside the list (accessibility.js
+        // makes it a listbox), so only rebuild when the entries changed.
+        // Selection is reapplied in place rather than forcing a rebuild.
+        const signature = JSON.stringify([torrentsTable.getRowSize(), untagged, sortedTags]);
+        if (tagFilterList.a11ySignature === signature) {
+            highlightSelectedTag();
+            return;
+        }
+        tagFilterList.a11ySignature = signature;
+
+        for (const el of [...tagFilterList.children])
+            el.remove();
+
+        tagFilterList.appendChild(createLink(TAGS_ALL, "QBT_TR(All)QBT_TR[CONTEXT=TagFilterModel]", torrentsTable.getRowSize()));
+        tagFilterList.appendChild(createLink(TAGS_UNTAGGED, "QBT_TR(Untagged)QBT_TR[CONTEXT=TagFilterModel]", untagged));
 
         for (const { tagName, tagSize } of sortedTags)
             tagFilterList.appendChild(createLink(tagName, tagName, tagSize));
@@ -818,9 +838,6 @@ window.addEventListener("DOMContentLoaded", async (event) => {
         const trackerFilterList = document.getElementById("trackerFilterList");
         if (trackerFilterList === null)
             return;
-
-        for (const el of [...trackerFilterList.children])
-            el.remove();
 
         const trackerItemTemplate = document.getElementById("trackerFilterItem");
 
@@ -862,12 +879,6 @@ window.addEventListener("DOMContentLoaded", async (event) => {
             trackerWarningCount += full_data.has_tracker_warning;
         }
 
-        trackerFilterList.appendChild(createLink(TRACKERS_ALL, "QBT_TR(All)QBT_TR[CONTEXT=TrackerFiltersList]", torrentsTable.getRowSize()));
-        trackerFilterList.appendChild(createLink(TRACKERS_TRACKERLESS, "QBT_TR(Trackerless)QBT_TR[CONTEXT=TrackerFiltersList]", trackerlessCount));
-        trackerFilterList.appendChild(createLink(TRACKERS_ERROR, "QBT_TR(Tracker error)QBT_TR[CONTEXT=TrackerFiltersList]", trackerErrorCount));
-        trackerFilterList.appendChild(createLink(TRACKERS_ANNOUNCE_ERROR, "QBT_TR(Other error)QBT_TR[CONTEXT=TrackerFiltersList]", announceErrorCount));
-        trackerFilterList.appendChild(createLink(TRACKERS_WARNING, "QBT_TR(Warning)QBT_TR[CONTEXT=TrackerFiltersList]", trackerWarningCount));
-
         // Sort trackers by hostname
         const sortedList = [];
         for (const [host, trackerTorrentMap] of trackerMap) {
@@ -883,6 +894,26 @@ window.addEventListener("DOMContentLoaded", async (event) => {
             });
         }
         sortedList.sort((left, right) => window.qBittorrent.Misc.naturalSortCollator.compare(left.trackerHost, right.trackerHost));
+
+        // This runs on nearly every sync; rebuilding the unchanged list every
+        // 1.5 s would keep destroying keyboard focus inside it (accessibility.js
+        // makes it a listbox). Selection is reapplied in place.
+        const signature = JSON.stringify([torrentsTable.getRowSize(), trackerlessCount, trackerErrorCount, announceErrorCount, trackerWarningCount, sortedList]);
+        if (trackerFilterList.a11ySignature === signature) {
+            highlightSelectedTracker();
+            return;
+        }
+        trackerFilterList.a11ySignature = signature;
+
+        for (const el of [...trackerFilterList.children])
+            el.remove();
+
+        trackerFilterList.appendChild(createLink(TRACKERS_ALL, "QBT_TR(All)QBT_TR[CONTEXT=TrackerFiltersList]", torrentsTable.getRowSize()));
+        trackerFilterList.appendChild(createLink(TRACKERS_TRACKERLESS, "QBT_TR(Trackerless)QBT_TR[CONTEXT=TrackerFiltersList]", trackerlessCount));
+        trackerFilterList.appendChild(createLink(TRACKERS_ERROR, "QBT_TR(Tracker error)QBT_TR[CONTEXT=TrackerFiltersList]", trackerErrorCount));
+        trackerFilterList.appendChild(createLink(TRACKERS_ANNOUNCE_ERROR, "QBT_TR(Other error)QBT_TR[CONTEXT=TrackerFiltersList]", announceErrorCount));
+        trackerFilterList.appendChild(createLink(TRACKERS_WARNING, "QBT_TR(Warning)QBT_TR[CONTEXT=TrackerFiltersList]", trackerWarningCount));
+
         for (const { trackerHost, trackerCount } of sortedList)
             trackerFilterList.appendChild(createLink(trackerHost, trackerHost, trackerCount));
 

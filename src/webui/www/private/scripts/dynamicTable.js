@@ -125,6 +125,57 @@ window.qBittorrent.DynamicTable ??= (() => {
             if ((label !== undefined) && !this.table.hasAttribute("aria-label"))
                 this.table.setAttribute("aria-label", label);
             this.tableBody.setAttribute("role", "presentation");
+
+            // which logical row (not which <tr>) has keyboard focus; see
+            // isRowAriaLabelFrozen()
+            this.a11yFocusedRowId = null;
+            this.dynamicTableDiv.addEventListener("focusin", (e) => {
+                const tr = e.target.closest("tr");
+                this.a11yFocusedRowId = ((tr !== null) && this.tableBody.contains(tr)) ? tr.rowId : null;
+            });
+            this.dynamicTableDiv.addEventListener("focusout", (e) => {
+                if ((e.relatedTarget !== null) && this.dynamicTableDiv.contains(e.relatedTarget))
+                    return;
+                const focusedRowId = this.a11yFocusedRowId;
+                this.a11yFocusedRowId = null;
+                // bring the row's label up to date now that it is no longer read out
+                const tr = e.target.closest("tr");
+                if ((tr !== null) && tr.isConnected && (tr.rowId === focusedRowId))
+                    this.refreshRowAriaLabel(tr);
+            });
+        }
+
+        // NVDA speaks every name change of the focused element, so while a row
+        // has focus its label is held against routine changes (speeds, ETA,
+        // counts), which would otherwise be re-read every sync. The hold is
+        // keyed by row id: an element reused for a different row is always
+        // relabelled. Unfocused rows stay current for the next arrow press.
+        isRowAriaLabelFrozen(tr, row) {
+            return (this.a11yFocusedRowId !== null)
+                && (tr.rowId === this.a11yFocusedRowId)
+                && (tr.a11yLabelRowId === tr.rowId)
+                && (this.getRowAriaLabelKey(tr, row) === tr.a11yLabelKey);
+        }
+
+        // Subclasses return a value whose change is worth hearing even while
+        // the focused row's label is held.
+        getRowAriaLabelKey(tr, row) {
+            return undefined;
+        }
+
+        applyRowAriaLabel(tr, row) {
+            const ariaLabel = this.getRowAriaLabel(tr, row);
+            if (ariaLabel === null)
+                return;
+            tr.setAttribute("aria-label", ariaLabel);
+            tr.a11yLabelRowId = tr.rowId;
+            tr.a11yLabelKey = this.getRowAriaLabelKey(tr, row);
+        }
+
+        refreshRowAriaLabel(tr) {
+            const row = this.rows.get(tr.rowId);
+            if (row !== undefined)
+                this.applyRowAriaLabel(tr, row);
         }
 
         setupVirtualList() {
@@ -408,13 +459,13 @@ window.qBittorrent.DynamicTable ??= (() => {
 
                 // ignore click/touch events performed when on the column's resize area
                 if (!this.canResize)
-                    this.setSortedColumn(el.columnName);
+                    this.sortByUser(el.columnName);
             }.bind(this);
 
             const onTouch = function(e) {
                 const column = e.target.columnName;
                 this.currentHeaderAction = "";
-                this.setSortedColumn(column);
+                this.sortByUser(column);
             }.bind(this);
 
             const onDoubleClick = function(e) {
@@ -438,7 +489,7 @@ window.qBittorrent.DynamicTable ??= (() => {
                     case "Enter":
                     case " ":
                         e.preventDefault();
-                        this.setSortedColumn(th.columnName);
+                        this.sortByUser(th.columnName);
                         break;
                     case "ContextMenu":
                         e.preventDefault();
@@ -868,7 +919,19 @@ window.qBittorrent.DynamicTable ??= (() => {
             localPreferences.set(`sorted_column_${this.dynamicTableDivId}`, column);
             localPreferences.set(`reverse_sort_${this.dynamicTableDivId}`, this.reverseSort);
             this.updateTable(false);
-            window.qBittorrent.Accessibility?.announce(`Sorted by ${this.columns[column]?.caption ?? column}, ${(this.reverseSort === "1") ? "descending" : "ascending"}`);
+        }
+
+        // spoken name of a column; "#" alone reads as "number"
+        columnSpokenName(columnName) {
+            const caption = this.columns[columnName]?.caption ?? columnName;
+            return (caption === "#") ? "Queue position" : caption;
+        }
+
+        // A sort the user asked for (click, touch, keyboard) is confirmed to
+        // screen readers; programmatic sorts while restoring state are not.
+        sortByUser(column) {
+            this.setSortedColumn(column);
+            window.qBittorrent.Accessibility?.announce(`Sorted by ${this.columnSpokenName(column)}, ${(this.reverseSort === "1") ? "descending" : "ascending"}`);
         }
 
         setSortedColumnIcon(newColumn, oldColumn, isReverse) {
@@ -1219,9 +1282,8 @@ window.qBittorrent.DynamicTable ??= (() => {
                     this.columns[i].updateTd(tds[i], row);
             }
 
-            const ariaLabel = this.getRowAriaLabel(tr, row);
-            if (ariaLabel !== null)
-                tr.setAttribute("aria-label", ariaLabel);
+            if (!this.isRowAriaLabelFrozen(tr, row))
+                this.applyRowAriaLabel(tr, row);
 
             row.data = {};
         }
@@ -1375,25 +1437,40 @@ window.qBittorrent.DynamicTable ??= (() => {
             if ((data === undefined) || (data.name === undefined))
                 return null;
 
-            const cells = this.getRowCells(tr);
-            const statusIndex = this.columns.findIndex((column) => column.name === "status");
-            const status = (statusIndex === -1) ? "" : (cells[statusIndex]?.textContent.trim() ?? "");
-
+            const status = this.getStatusText(tr);
             const parts = [data.name];
             if (status !== "")
                 parts.push(status);
-            if (data.progress !== undefined)
-                parts.push(`${Math.round(data.progress * 100)}%`);
+            // Progress and ETA only matter until the download completes; for a
+            // seed, "ETA" is the countdown to the share limit. That, the ratio
+            // and the rest stay in the details panel.
+            const incomplete = (data.progress !== undefined) && (data.progress < 1);
+            if (incomplete)
+                parts.push(`${Math.floor(data.progress * 100)}%`);
             if (data.dlspeed > 0)
                 parts.push(`down ${window.qBittorrent.Misc.friendlyUnit(data.dlspeed, true)}`);
             if (data.upspeed > 0)
                 parts.push(`up ${window.qBittorrent.Misc.friendlyUnit(data.upspeed, true)}`);
-            if ((data.eta !== undefined) && (data.eta >= 0) && (data.eta < window.qBittorrent.Misc.MAX_ETA))
+            if (incomplete && (data.eta !== undefined) && (data.eta >= 0) && (data.eta < window.qBittorrent.Misc.MAX_ETA))
                 parts.push(`ETA ${window.qBittorrent.Misc.friendlyDuration(data.eta, window.qBittorrent.Misc.MAX_ETA)}`);
-            if (data.ratio !== undefined)
-                parts.push(`ratio ${(data.ratio === -1) ? "infinite" : data.ratio.toFixed(2)}`);
 
             return parts.join(", ");
+        }
+
+        // the status column's text, as spoken
+        getStatusText(tr) {
+            const statusIndex = this.columns.findIndex((column) => column.name === "status");
+            const status = (statusIndex === -1) ? "" : (this.getRowCells(tr)[statusIndex]?.textContent.trim() ?? "");
+            // "[F] Seeding" reads as bracket noise
+            return status.startsWith("[F] ") ? `${status.slice(4)} (forced)` : status;
+        }
+
+        // A finished download, a stall or an error is worth hearing even while
+        // the row's label is held. Keyed on the displayed status rather than
+        // the raw state: seeds flip between uploading and stalledUP whenever a
+        // peer comes or goes, and both read "Seeding".
+        getRowAriaLabelKey(tr, row) {
+            return this.getStatusText(tr);
         }
 
         initColumns() {
