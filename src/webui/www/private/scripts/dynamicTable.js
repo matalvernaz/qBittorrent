@@ -126,22 +126,43 @@ window.qBittorrent.DynamicTable ??= (() => {
                 this.table.setAttribute("aria-label", label);
             this.tableBody.setAttribute("role", "presentation");
 
+            // Firefox makes a scroll container a tab stop of its own; here it
+            // read the raw text of the first row and ignored the arrow keys.
+            // The listbox's tab stop is a row instead (syncRowTabStop).
+            this.dynamicTableDiv.tabIndex = -1;
+
             // which logical row (not which <tr>) has keyboard focus; see
-            // isRowAriaLabelFrozen()
+            // isRowAriaLabelFrozen() and rerender()
             this.a11yFocusedRowId = null;
+            this.a11yFocusedRowIndex = -1;
             this.dynamicTableDiv.addEventListener("focusin", (e) => {
                 const tr = e.target.closest("tr");
-                this.a11yFocusedRowId = ((tr !== null) && this.tableBody.contains(tr)) ? tr.rowId : null;
+                const isRow = (tr !== null) && this.tableBody.contains(tr);
+                this.a11yFocusedRowId = isRow ? tr.rowId : null;
+                if (isRow) {
+                    this.a11yFocusedRowIndex = this.getNavigableRows().findIndex((row) => row.rowId === tr.rowId);
+                    this.syncRowTabStop();
+                }
             });
             this.dynamicTableDiv.addEventListener("focusout", (e) => {
                 if ((e.relatedTarget !== null) && this.dynamicTableDiv.contains(e.relatedTarget))
                     return;
-                const focusedRowId = this.a11yFocusedRowId;
-                this.a11yFocusedRowId = null;
-                // bring the row's label up to date now that it is no longer read out
-                const tr = e.target.closest("tr");
-                if ((tr !== null) && tr.isConnected && (tr.rowId === focusedRowId))
-                    this.refreshRowAriaLabel(tr);
+                const target = e.target;
+                // decide after the current task: a focused row detached by a
+                // re-render is not the user leaving (the render path refocuses)
+                queueMicrotask(() => {
+                    if (!target.isConnected || this.dynamicTableDiv.contains(document.activeElement))
+                        return;
+                    const focusedRowId = this.a11yFocusedRowId;
+                    this.a11yFocusedRowId = null;
+                    // bring the row's label up to date now that it is no longer read out
+                    const tr = target.closest("tr");
+                    if ((tr !== null) && (tr.rowId === focusedRowId))
+                        this.refreshRowAriaLabel(tr);
+                    // release a row that was only rendered because it had focus
+                    if (this.useVirtualList)
+                        this.rerender();
+                });
             });
         }
 
@@ -264,21 +285,11 @@ window.qBittorrent.DynamicTable ??= (() => {
 
                 switch (e.key) {
                     case "ArrowUp":
-                        e.preventDefault();
-                        if (e.shiftKey)
-                            this.extendSelectionFrom(tr, -1);
-                        else
-                            this.selectPreviousRow();
-                        this.dynamicTableDiv.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
-                        break;
-
                     case "ArrowDown":
                         e.preventDefault();
-                        if (e.shiftKey)
-                            this.extendSelectionFrom(tr, 1);
-                        else
-                            this.selectNextRow();
-                        this.dynamicTableDiv.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
+                        // the focused row is the anchor, in sorted order (a
+                        // pinned row may sit far from its DOM neighbours)
+                        this.moveSelectionFrom(tr, (e.key === "ArrowDown") ? 1 : -1, e.shiftKey);
                         break;
 
                     case "Home":
@@ -486,6 +497,31 @@ window.qBittorrent.DynamicTable ??= (() => {
                 if (th === null)
                     return;
                 switch (e.key) {
+                    case "ArrowLeft":
+                    case "ArrowRight":
+                    case "ArrowUp":
+                    case "ArrowDown":
+                    case "Home":
+                    case "End": {
+                        // Sort-by listbox only; moving focus never re-sorts
+                        if (this.fixedTableHeader.getAttribute("role") !== "listbox")
+                            break;
+                        e.preventDefault();
+                        const visible = [...this.getRowCells(this.fixedTableHeader)].filter((cell) => !cell.classList.contains("invisible"));
+                        const index = visible.indexOf(th);
+                        const forward = (e.key === "ArrowRight") || (e.key === "ArrowDown");
+                        let target;
+                        if (e.key === "Home")
+                            target = visible[0];
+                        else if (e.key === "End")
+                            target = visible.at(-1);
+                        else
+                            target = visible[Math.min(Math.max(index + (forward ? 1 : -1), 0), visible.length - 1)];
+                        for (const cell of visible)
+                            cell.tabIndex = (cell === target) ? 0 : -1;
+                        target.focus();
+                        break;
+                    }
                     case "Enter":
                     case " ":
                         e.preventDefault();
@@ -856,6 +892,74 @@ window.qBittorrent.DynamicTable ??= (() => {
                 cols[i].classList.toggle("invisible", !this.columns[i].isVisible());
             }
             this.setSortedColumnIcon(this.sortedColumn, null, (this.reverseSort === "1"));
+            this.syncHeaderSortList();
+        }
+
+        // Tables whose header holds controls (the files tree's "select all"
+        // checkbox) keep plain column headers. A method rather than a field:
+        // the base constructor runs before subclass fields are initialised.
+        usesHeaderSortList() {
+            return true;
+        }
+
+        // The header row is exposed as one "Sort by" listbox instead of a
+        // table of focusable column headers: one browse-mode line and one tab
+        // stop instead of one per column. The selected option is the sorted
+        // column; arrows move between columns, Enter/Space sorts.
+        syncHeaderSortList() {
+            const header = this.fixedTableHeader;
+            const table = header.closest("table");
+            const ths = [...this.getRowCells(header)];
+            const visible = ths.filter((th) => !th.classList.contains("invisible"));
+            // a single column has nothing to choose between; leave it a header
+            const enabled = this.usesHeaderSortList() && (visible.length >= 2);
+            if (!enabled) {
+                if (header.getAttribute("role") === "listbox") {
+                    for (const element of [table, header.parentElement, header])
+                        element.removeAttribute("role");
+                    header.removeAttribute("aria-label");
+                    header.removeAttribute("aria-orientation");
+                    for (const th of ths) {
+                        th.removeAttribute("role");
+                        th.removeAttribute("aria-selected");
+                        th.removeAttribute("aria-label");
+                        th.title = this.columns[th.columnName]?.caption ?? "";
+                        th.tabIndex = 0;
+                    }
+                }
+                return;
+            }
+
+            table.setAttribute("role", "presentation");
+            header.parentElement.setAttribute("role", "presentation");
+            header.setAttribute("role", "listbox");
+            header.setAttribute("aria-label", "Sort by");
+            header.setAttribute("aria-orientation", "horizontal");
+
+            const direction = (this.reverseSort === "1") ? "descending" : "ascending";
+            // sortedColumn is a name, or the index 0 (first column) by default
+            const sortedName = this.columns[this.sortedColumn]?.name ?? this.sortedColumn;
+            let stop = null;
+            for (const th of ths) {
+                const sorted = th.columnName === sortedName;
+                const name = this.columnSpokenName(th.columnName);
+                const label = sorted ? `${name}, sorted ${direction}` : name;
+                th.setAttribute("role", "option");
+                th.setAttribute("aria-selected", sorted ? "true" : "false");
+                th.setAttribute("aria-label", label);
+                // NVDA reads a title that differs from the name as a description
+                th.title = label;
+                th.removeAttribute("aria-sort");
+                if (sorted && visible.includes(th))
+                    stop = th;
+            }
+            // sorted column hidden or none sorted: nothing is marked selected
+            // (that would announce a sort that isn't in effect), but the
+            // control stays reachable
+            const focused = ths.find((th) => th === document.activeElement);
+            stop = focused ?? stop ?? visible[0];
+            for (const th of ths)
+                th.tabIndex = (th === stop) ? 0 : -1;
         }
 
         updateHeader(header) {
@@ -887,6 +991,7 @@ window.qBittorrent.DynamicTable ??= (() => {
             const action = column.isVisible() ? "remove" : "add";
             fths[pos].classList[action]("invisible");
             this.colgroup.children[pos].classList[action]("invisible");
+            this.syncHeaderSortList();
 
             for (const tr of this.getTrs()) {
                 const td = this.getRowCells(tr)[pos];
@@ -953,6 +1058,7 @@ window.qBittorrent.DynamicTable ??= (() => {
                 oldColElem.classList.remove("sorted", "reverse");
                 oldColElem.removeAttribute("aria-sort");
             }
+            this.syncHeaderSortList();
         }
 
         getSelectedRowId() {
@@ -1028,6 +1134,7 @@ window.qBittorrent.DynamicTable ??= (() => {
                 if (this.a11yRowRole)
                     tr.setAttribute("aria-selected", selected ? "true" : "false");
             }
+            this.syncRowTabStop();
         }
 
         onSelectedRowChanged() {}
@@ -1143,32 +1250,50 @@ window.qBittorrent.DynamicTable ??= (() => {
                     }
                 }
 
-                // reorder table rows
-                let prevTr = null;
-                for (const [rowPos, { rowId }] of rows.entries()) {
-                    const tr = trMap.get(rowId);
-                    trMap.delete(rowId);
-
-                    const isInCorrectLocation = rowId === trs[rowPos]?.rowId;
-                    if (!isInCorrectLocation) {
-                        // move row into correct location
-                        if (prevTr === null) {
-                            // insert as first row in table
-                            if (trs.length === 0)
-                                this.tableBody.append(tr);
-                            else
-                                trs[0].before(tr);
-                        }
-                        else {
-                            prevTr.after(tr);
-                        }
-                    }
-                    prevTr = tr;
+                const focusedTr = this.getFocusedRowElement();
+                const desired = rows.map(({ rowId }) => trMap.get(rowId));
+                const focusedStays = (focusedTr !== null) && desired.includes(focusedTr);
+                if (focusedStays) {
+                    // moving the focused row would blur it; move the others
+                    for (const { rowId } of rows)
+                        trMap.delete(rowId);
+                    for (const tr of trMap.values())
+                        tr.remove();
+                    this.arrangeRowsAround(desired, focusedTr);
+                    this.a11yFocusedRowIndex = this.getNavigableRows().findIndex((row) => row.rowId === focusedTr.rowId);
                 }
+                else {
+                    // reorder table rows
+                    let prevTr = null;
+                    for (const [rowPos, { rowId }] of rows.entries()) {
+                        const tr = trMap.get(rowId);
+                        trMap.delete(rowId);
 
-                for (const tr of trMap.values())
-                    tr.remove();
+                        const isInCorrectLocation = rowId === trs[rowPos]?.rowId;
+                        if (!isInCorrectLocation) {
+                            // move row into correct location
+                            if (prevTr === null) {
+                                // insert as first row in table
+                                if (trs.length === 0)
+                                    this.tableBody.append(tr);
+                                else
+                                    trs[0].before(tr);
+                            }
+                            else {
+                                prevTr.after(tr);
+                            }
+                        }
+                        prevTr = tr;
+                    }
+
+                    for (const tr of trMap.values())
+                        tr.remove();
+
+                    if (focusedTr !== null)
+                        this.refocusAfterFocusedRowLeft();
+                }
             }
+            this.syncRowTabStop();
         }
 
         rerender(rows = this.getFilteredAndSortedRows()) {
@@ -1192,6 +1317,14 @@ window.qBittorrent.DynamicTable ??= (() => {
                 startRow = Math.max(0, startRow - 1);
             const endRow = Math.min((startRow + visibleRowCount), rows.length);
 
+            // The focused row's element is reserved for that row: positional
+            // reuse must not turn it into another torrent, it stays rendered
+            // while its row is in the results (even outside the window, at its
+            // true offset), and it is never detached, which would blur it.
+            const focusedTr = this.getFocusedRowElement();
+            const focusedRowId = focusedTr?.rowId ?? null;
+            let focusedIndex = -1;
+
             const elements = [];
             for (let i = startRow; i < endRow; ++i) {
                 const row = rows[i];
@@ -1199,12 +1332,22 @@ window.qBittorrent.DynamicTable ??= (() => {
                     continue;
                 const offset = i * this.rowHeight;
                 const position = i - startRow;
-                // reuse existing elements
-                let element = this.cachedElements[position];
-                if (element !== undefined)
+                let element;
+                if ((focusedTr !== null) && (row.rowId === focusedRowId)) {
+                    element = focusedTr;
+                    focusedIndex = i;
                     this.updateRowElement(element, row.rowId, offset);
-                else
-                    element = this.cachedElements[position] = this.createRowElement(row, offset);
+                }
+                else {
+                    // reuse existing elements
+                    element = this.cachedElements[position];
+                    if ((element !== undefined) && (element === focusedTr))
+                        element = undefined;
+                    if (element !== undefined)
+                        this.updateRowElement(element, row.rowId, offset);
+                    else
+                        element = this.cachedElements[position] = this.createRowElement(row, offset);
+                }
                 if (this.a11yRowRole) {
                     // expose true position within the filtered set; only a
                     // window of rows exists in the DOM at any time
@@ -1213,8 +1356,36 @@ window.qBittorrent.DynamicTable ??= (() => {
                 }
                 elements.push(element);
             }
-            const hadFocus = this.dynamicTableDiv.contains(document.activeElement);
-            this.tableBody.replaceChildren(...elements);
+            if ((focusedTr !== null) && (focusedIndex === -1)) {
+                const i = rows.findIndex((row) => row.rowId === focusedRowId);
+                if (i !== -1) {
+                    focusedIndex = i;
+                    this.updateRowElement(focusedTr, focusedRowId, i * this.rowHeight);
+                    focusedTr.setAttribute("aria-posinset", i + 1);
+                    focusedTr.setAttribute("aria-setsize", rows.length);
+                    if (i < startRow)
+                        elements.unshift(focusedTr);
+                    else
+                        elements.push(focusedTr);
+                }
+            }
+            if (focusedIndex !== -1)
+                this.a11yFocusedRowIndex = focusedIndex;
+
+            const current = [...this.tableBody.children];
+            const unchanged = (current.length === elements.length) && current.every((element, i) => element === elements[i]);
+            if (!unchanged) {
+                if (focusedIndex !== -1) {
+                    for (const child of current) {
+                        if (!elements.includes(child))
+                            child.remove();
+                    }
+                    this.arrangeRowsAround(elements, focusedTr);
+                }
+                else {
+                    this.tableBody.replaceChildren(...elements);
+                }
+            }
 
             // update row classes
             this.setRowClass();
@@ -1223,9 +1394,9 @@ window.qBittorrent.DynamicTable ??= (() => {
             for (const row of this.tableBody.children)
                 this.updateRow(row, true);
 
-            // restore focus so keyboard navigation continues working
-            if (hadFocus)
-                this.getTrByRowId(this.getSelectedRowId())?.focus({ preventScroll: true });
+            if ((focusedTr !== null) && (focusedIndex === -1))
+                this.refocusAfterFocusedRowLeft();
+            this.syncRowTabStop();
         }
 
         createRowElement(row, top = -1) {
@@ -1296,8 +1467,12 @@ window.qBittorrent.DynamicTable ??= (() => {
             }
             else {
                 const tr = this.getTrByRowId(rowId);
+                const hadFocus = (tr !== undefined) && (tr === this.getFocusedRowElement());
                 tr?.remove();
+                if (hadFocus)
+                    this.refocusAfterFocusedRowLeft();
             }
+            this.syncRowTabStop();
         }
 
         clear() {
@@ -1389,29 +1564,132 @@ window.qBittorrent.DynamicTable ??= (() => {
             return (parts.length > 0) ? parts.join(", ") : null;
         }
 
-        // add the row adjacent to `tr` to the selection (Shift+Arrow)
-        extendSelectionFrom(tr, direction) {
-            const visibleRows = Array.prototype.filter.call(this.getTrs(), (row => !row.classList.contains("invisible") && (row.style.display !== "none")));
-            const index = visibleRows.indexOf(tr);
-            const target = visibleRows[index + direction];
-            if (target === undefined)
+        // Up/Down from `tr` in sorted order: select the neighbouring row, or
+        // with Shift add it to the selection, and focus it
+        moveSelectionFrom(tr, direction, extend) {
+            const rows = this.getNavigableRows();
+            const index = rows.findIndex((row) => row.rowId === tr.rowId);
+            const target = rows[index + direction];
+            if ((index === -1) || (target === undefined))
                 return;
-            this.selectRow(target.getAttribute("data-row-id"));
-            target.focus({ preventScroll: true });
+            if (!extend)
+                this.deselectAll();
+            if (!this.isRowSelected(target.rowId))
+                this.selectRow(target.rowId);
+            this.focusLogicalRow(target.rowId);
         }
 
-        // jump to the first/last row of the filtered set (Home/End); the
-        // target row may not be rendered yet, so scroll and let rerender()
-        // restore focus to the newly selected row
+        // jump to the first/last row of the filtered set (Home/End)
         selectEdgeRow(first) {
-            const rows = this.getFilteredAndSortedRows();
+            const rows = this.getNavigableRows();
             if (rows.length === 0)
                 return;
             const row = rows[first ? 0 : (rows.length - 1)];
             this.deselectAll();
             this.selectRow(row.rowId);
-            this.dynamicTableDiv.scrollTop = first ? 0 : this.dynamicTableDiv.scrollHeight;
-            this.getTrByRowId(row.rowId)?.focus({ preventScroll: true });
+            this.focusLogicalRow(row.rowId);
+        }
+
+        // Rows keyboard navigation can land on, in sorted order. Without the
+        // virtual list some tables hide rows in place (collapsed tracker
+        // endpoints, folders), which the old DOM-based navigation skipped too.
+        getNavigableRows() {
+            const rows = this.getFilteredAndSortedRows();
+            if (this.useVirtualList)
+                return rows;
+            const hidden = new Set([...this.getTrs()]
+                .filter((tr) => this.isRowHiddenInPlace(tr))
+                .map((tr) => tr.rowId));
+            return rows.filter((row) => !hidden.has(row.rowId));
+        }
+
+        // Make the row exist and be visible, then focus it. In virtual mode
+        // only a window of rows is rendered, so scroll it into the window and
+        // render synchronously rather than waiting for the scroll event.
+        focusLogicalRow(rowId) {
+            const rows = this.getFilteredAndSortedRows();
+            const index = rows.findIndex((row) => row.rowId === rowId);
+            if (index === -1)
+                return null;
+            if (this.useVirtualList) {
+                const div = this.dynamicTableDiv;
+                const top = index * this.rowHeight;
+                if (top < div.scrollTop)
+                    div.scrollTop = top;
+                else if ((top + this.rowHeight) > (div.scrollTop + div.clientHeight))
+                    div.scrollTop = (top + this.rowHeight) - div.clientHeight;
+                this.renderedOffset = div.scrollTop;
+                this.rerender(rows);
+            }
+            const tr = this.getTrByRowId(rowId);
+            if (tr === undefined)
+                return null;
+            tr.focus({ preventScroll: true });
+            if (this.useVirtualList)
+                this.rerender(rows); // releases the previously pinned row, if any
+            else
+                tr.scrollIntoView({ block: "nearest" });
+            return tr;
+        }
+
+        // the row element in this table that has keyboard focus, if any
+        getFocusedRowElement() {
+            const active = document.activeElement;
+            return ((active !== null) && (active.parentNode === this.tableBody)) ? active : null;
+        }
+
+        // Exactly one row is the listbox's tab stop: the focused row, else the
+        // selected row when rendered, else the first rendered row; none when
+        // the list is empty.
+        syncRowTabStop() {
+            if (!this.a11yRowRole)
+                return;
+            const allTrs = [...this.getTrs()];
+            // rows hidden in place (collapsed tracker endpoints, folders) can't
+            // take focus, so they can't be the stop either
+            const trs = allTrs.filter((tr) => !this.isRowHiddenInPlace(tr));
+            const selectedRowId = this.getSelectedRowId();
+            const stop = this.getFocusedRowElement()
+                ?? trs.find((tr) => tr.rowId === selectedRowId)
+                ?? trs[0]
+                ?? null;
+            for (const tr of allTrs)
+                tr.tabIndex = (tr === stop) ? 0 : -1;
+        }
+
+        isRowHiddenInPlace(tr) {
+            return tr.classList.contains("invisible") || (tr.style.display === "none");
+        }
+
+        // Put tbody's rows in `desired` order without detaching `focused`
+        // (moving a focused node blurs it): the rows before it are inserted
+        // in order before it, the rows after it in order after it. The final
+        // order is exactly `desired`; only which nodes move differs.
+        arrangeRowsAround(desired, focused) {
+            const k = desired.indexOf(focused);
+            for (let i = k - 1; i >= 0; --i) {
+                if (desired[i].nextElementSibling !== desired[i + 1])
+                    this.tableBody.insertBefore(desired[i], desired[i + 1]);
+            }
+            for (let i = k + 1; i < desired.length; ++i) {
+                if (desired[i - 1].nextElementSibling !== desired[i])
+                    desired[i - 1].after(desired[i]);
+            }
+        }
+
+        // The focused row left the results (removed, or filtered out while it
+        // had focus): focus the row now at its position. Focus only; the
+        // selection is not touched, so nothing new is acted on by accident.
+        refocusAfterFocusedRowLeft() {
+            const rows = this.getNavigableRows();
+            if (rows.length === 0) {
+                // nothing left to focus; don't leave a label hold behind for a
+                // torrent that may come back
+                this.a11yFocusedRowId = null;
+                return;
+            }
+            const index = Math.min(Math.max(this.a11yFocusedRowIndex, 0), rows.length - 1);
+            this.focusLogicalRow(rows[index].rowId);
         }
 
         // open the row's context menu via keyboard (ContextMenu key, Shift+F10)
@@ -2464,6 +2742,7 @@ window.qBittorrent.DynamicTable ??= (() => {
         toggleTrackerCollapsed(id) {
             this.collapseState.set(id, !this.isTrackerCollapsed(id));
             this.#updateTrackerRowState(id, this.isTrackerCollapsed(id));
+            this.syncRowTabStop();
         }
 
         #updateEndpointVisibility(endpoint, shouldHide) {
@@ -2694,6 +2973,7 @@ window.qBittorrent.DynamicTable ??= (() => {
                         continue;
                     this.#updateEndpointVisibility(row.rowId, this.isTrackerCollapsed(row.full_data._tracker));
                 }
+                this.syncRowTabStop();
             }
         }
 
@@ -2722,6 +3002,10 @@ window.qBittorrent.DynamicTable ??= (() => {
         fileNameColumn = "name";
         headerCheckboxClickHandler = null;
         headerCheckboxId = "tristate_cb";
+
+        usesHeaderSortList() {
+            return false;
+        }
 
         getRowAriaLabel(tr, row) {
             const base = super.getRowAriaLabel(tr, row);
@@ -2809,6 +3093,7 @@ window.qBittorrent.DynamicTable ??= (() => {
             if (state !== undefined)
                 state.collapsed = false;
             this.#updateNodeState(id, false);
+            this.syncRowTabStop();
         }
 
         collapseNode(id) {
@@ -2819,6 +3104,7 @@ window.qBittorrent.DynamicTable ??= (() => {
             if (state !== undefined)
                 state.collapsed = true;
             this.#updateNodeState(id, true);
+            this.syncRowTabStop();
         }
 
         expandAllNodes() {

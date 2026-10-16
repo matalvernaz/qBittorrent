@@ -371,6 +371,63 @@ window.qBittorrent.Accessibility ??= (() => {
         document.getElementById("preferencesButton")?.after(button);
     };
 
+    /* ---------- toolbar roving focus ---------- */
+
+    // The action buttons are one tab stop, moved between with the arrow keys
+    // (ARIA toolbar pattern). The tabs, search box and selects that also sit
+    // in #mochaToolbar keep their own stops.
+    const setupToolbarRoving = () => {
+        const toolbar = document.getElementById("mochaToolbar");
+        const allButtons = () => [...toolbar.querySelectorAll("[role=\"button\"], #a11yPauseUpdatesButton")]
+            .filter((button) => button.closest("#mainWindowTabs") === null);
+        const buttons = () => allButtons().filter(isRendered);
+
+        const setStop = (stop) => {
+            for (const button of allButtons())
+                button.tabIndex = (button === stop) ? 0 : -1;
+        };
+        setStop(buttons()[0]);
+
+        // buttons can be hidden later (the queue buttons when queueing is off);
+        // never leave the stop on one that can't be reached
+        new MutationObserver(() => {
+            const list = buttons();
+            if (!list.some((button) => button.tabIndex === 0))
+                setStop(list[0]);
+        }).observe(toolbar, { subtree: true, attributes: true, attributeFilter: ["style", "class"] });
+
+        toolbar.addEventListener("focusin", (e) => {
+            if (buttons().includes(e.target))
+                setStop(e.target);
+        });
+        toolbar.addEventListener("keydown", (e) => {
+            const list = buttons();
+            const index = list.indexOf(e.target);
+            if (index === -1)
+                return;
+            let target = null;
+            switch (e.key) {
+                case "ArrowRight":
+                    target = list[(index + 1) % list.length];
+                    break;
+                case "ArrowLeft":
+                    target = list[(index - 1 + list.length) % list.length];
+                    break;
+                case "Home":
+                    target = list[0];
+                    break;
+                case "End":
+                    target = list.at(-1);
+                    break;
+                default:
+                    return;
+            }
+            e.preventDefault();
+            setStop(target);
+            target.focus();
+        });
+    };
+
     /* ---------- MochaUI window (dialog) management ---------- */
 
     const setupDialogManager = () => {
@@ -502,7 +559,8 @@ window.qBittorrent.Accessibility ??= (() => {
             return;
         link.addEventListener("click", (e) => {
             e.preventDefault();
-            const row = document.querySelector("#torrentsTableDiv tbody tr.selected")
+            const row = document.querySelector("#torrentsTableDiv tbody tr[tabindex=\"0\"]")
+                ?? document.querySelector("#torrentsTableDiv tbody tr.selected")
                 ?? document.querySelector("#torrentsTableDiv tbody tr");
             row?.focus();
         });
@@ -541,6 +599,9 @@ window.qBittorrent.Accessibility ??= (() => {
     // and the filters become operable from the keyboard.
 
     const optionLabel = (li) => (li.getAttribute("aria-label") ?? li.textContent).trim();
+
+    // what the option shows: a subcategory's leaf name, not its full path
+    const optionVisibleText = (li) => (li.querySelector(":scope > .link")?.textContent ?? "").trim();
 
     const categoryOptionLabel = (li) => {
         const text = (li.querySelector(":scope > .link > span")?.textContent ?? li.textContent).trim();
@@ -743,7 +804,8 @@ window.qBittorrent.Accessibility ??= (() => {
                         const query = ((typeahead.length > 1) && [...typeahead].every((c) => c === typeahead[0])) ? typeahead[0] : typeahead;
                         const start = (query.length === 1) ? index + 1 : index;
                         const ordered = [...visible.slice(start), ...visible.slice(0, start)];
-                        target = ordered.find((option) => optionLabel(option).toLowerCase().startsWith(query)) ?? null;
+                        target = ordered.find((option) => optionLabel(option).toLowerCase().startsWith(query)
+                            || optionVisibleText(option).toLowerCase().startsWith(query)) ?? null;
                     }
                     break;
             }
@@ -756,6 +818,11 @@ window.qBittorrent.Accessibility ??= (() => {
     };
 
     const setupFilterListboxes = () => {
+        // the panel scrolls; Firefox would otherwise make the scroller itself a
+        // tab stop in front of the filter controls
+        applyWhenPresent("Filters", (panel) => {
+            panel.tabIndex = -1;
+        });
         // the last list in filters.html; all four exist once it does
         applyWhenPresent("trackerFilterList", () => {
             for (const id of FILTER_LIST_IDS) {
@@ -900,7 +967,9 @@ window.qBittorrent.Accessibility ??= (() => {
         new MutationObserver((mutations) => {
             for (const mutation of mutations) {
                 for (const node of mutation.addedNodes) {
-                    if (node.nodeType === Node.ELEMENT_NODE)
+                    // table rows are named by their composed aria-label, and
+                    // they are added often; leave them alone
+                    if ((node.nodeType === Node.ELEMENT_NODE) && (node.closest(".dynamicTableDiv tbody") === null))
                         stripRedundantAlt(node);
                 }
             }
@@ -919,6 +988,7 @@ window.qBittorrent.Accessibility ??= (() => {
         setupTablist("propertiesTabs", "Torrent details tabs");
         setupTablist("panelTabs", "Log tabs");
         setupPauseToggle();
+        setupToolbarRoving();
         setupDialogManager();
         setupActionAnnouncements();
         setupSkipLink();

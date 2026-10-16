@@ -897,7 +897,9 @@ window.addEventListener("DOMContentLoaded", async (event) => {
 
         // This runs on nearly every sync; rebuilding the unchanged list every
         // 1.5 s would keep destroying keyboard focus inside it (accessibility.js
-        // makes it a listbox). Selection is reapplied in place.
+        // makes it a listbox). Selection is reapplied in place. Anything else
+        // that empties these lists must also delete their a11ySignature, or
+        // the next sync would skip refilling them.
         const signature = JSON.stringify([torrentsTable.getRowSize(), trackerlessCount, trackerErrorCount, announceErrorCount, trackerWarningCount, sortedList]);
         if (trackerFilterList.a11ySignature === signature) {
             highlightSelectedTracker();
