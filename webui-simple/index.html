@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="${LANG}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- torrent, file, tracker and peer names come from strangers; nothing
+         but our own scripts may run, and app.js only ever sets textContent -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
+    <title>qBittorrent</title>
+    <link rel="icon" type="image/svg+xml" href="images/qbittorrent-tray.svg">
+    <link rel="stylesheet" href="simple/app.css?v=${CACHEID}-__CSS_VERSION__">
+    <script defer src="simple/app.js?v=${CACHEID}-__JS_VERSION__"></script>
+</head>
+<body>
+    <div id="banner" class="banner" hidden></div>
+    <main id="main">
+        <p>Loading torrents…</p>
+    </main>
+    <footer class="footer">
+        <a href="full.html">Full qBittorrent interface</a>
+        <button type="button" id="pauseUpdates" aria-pressed="false">Pause live updates</button>
+    </footer>
+    <div id="announcer" class="visually-hidden" role="status"></div>
+    <noscript><p>This page needs JavaScript. The <a href="full.html">full interface</a> needs it too.</p></noscript>
+</body>
+</html>
