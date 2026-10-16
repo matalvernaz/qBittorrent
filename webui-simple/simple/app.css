@@ -1,0 +1,200 @@
+/* Simple qBittorrent page: plain document styling, light and dark. */
+
+:root {
+    color-scheme: light dark;
+    --text: #1f1f1f;
+    --muted: #4a4a4a;
+    --background: #ffffff;
+    --surface: #f3f3f3;
+    --border: #8a8a8a;
+    --link: #0b57b0;
+    --focus: #0b57b0;
+    --danger: #a4161a;
+    --banner: #fff4cc;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --text: #ececec;
+        --muted: #c4c4c4;
+        --background: #161616;
+        --surface: #232323;
+        --border: #8f8f8f;
+        --link: #8cc0ff;
+        --focus: #8cc0ff;
+        --danger: #ff9a9a;
+        --banner: #3d3315;
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    background: var(--background);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 1.05rem;
+    line-height: 1.5;
+    margin: 0 auto;
+    max-width: 60rem;
+    padding: 1rem;
+}
+
+a {
+    color: var(--link);
+}
+
+:focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+}
+
+h1 {
+    font-size: 1.6rem;
+    margin: 0.5rem 0;
+}
+
+h1:focus {
+    outline: none;
+}
+
+h2 {
+    font-size: 1.2rem;
+    margin: 1.25rem 0 0.25rem;
+}
+
+button,
+input,
+select,
+textarea {
+    color: inherit;
+    font: inherit;
+}
+
+button {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    padding: 0.35rem 0.9rem;
+}
+
+button.danger {
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+input[type="search"],
+input[type="file"],
+select,
+textarea {
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.35rem 0.5rem;
+}
+
+input[type="search"] {
+    width: 100%;
+}
+
+textarea {
+    width: 100%;
+}
+
+/* group headings are disclosure buttons that look like headings */
+h2 > button.group-toggle {
+    background: none;
+    border: 0;
+    border-radius: 4px;
+    font-size: inherit;
+    font-weight: inherit;
+    padding: 0.1rem 0.25rem 0.1rem 1.4rem;
+    position: relative;
+    text-align: left;
+    width: 100%;
+}
+
+/* drawn triangle: CSS text content would end up in the button's name */
+h2 > button.group-toggle::before {
+    border-color: transparent transparent transparent currentcolor;
+    border-style: solid;
+    border-width: 0.4rem 0 0.4rem 0.55rem;
+    content: "";
+    left: 0.35rem;
+    position: absolute;
+    top: 0.55em;
+    transition: transform 0.1s ease-in-out;
+}
+
+h2 > button.group-toggle[aria-expanded="true"]::before {
+    transform: rotate(90deg);
+}
+
+ul.torrents {
+    margin: 0;
+    padding-left: 1.6rem;
+}
+
+ul.torrents li {
+    padding: 0.15rem 0;
+}
+
+.meta {
+    color: var(--muted);
+}
+
+.banner {
+    background: var(--banner);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 0.75rem;
+    padding: 0.5rem 0.75rem;
+}
+
+.actions button {
+    margin-right: 0.5rem;
+}
+
+.confirm {
+    border: 2px solid var(--danger);
+    border-radius: 8px;
+    margin: 0.75rem 0;
+    padding: 0.25rem 1rem 0.75rem;
+}
+
+.confirm h2:focus {
+    outline: none;
+}
+
+details {
+    margin: 0.5rem 0;
+}
+
+summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.footer {
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-top: 2rem;
+    padding-top: 0.75rem;
+}
+
+.visually-hidden {
+    border: 0;
+    clip-path: inset(50%);
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    padding: 0;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
+}
