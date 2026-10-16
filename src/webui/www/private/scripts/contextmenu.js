@@ -46,6 +46,11 @@ window.qBittorrent.ContextMenu ??= (() => {
     };
 
     let lastShownContextMenu = null;
+    // the menu fades in through a visibility transition (style.css), and an
+    // item that is still visibility:hidden refuses focus; retry for this many
+    // frames (about half a second)
+    const MENU_FOCUS_MAX_FRAMES = 30;
+
     class ContextMenu {
         constructor(options) {
             this.options = {
@@ -103,9 +108,18 @@ window.qBittorrent.ContextMenu ??= (() => {
         }
 
         focusFirstItem() {
-            window.requestAnimationFrame(() => {
-                this.visibleItemsOf(this.menu)[0]?.focus();
-            });
+            let frames = 0;
+            const attempt = () => {
+                if (!this.menu.classList.contains("visible"))
+                    return;
+                const item = this.visibleItemsOf(this.menu)[0];
+                if (item === undefined)
+                    return;
+                item.focus();
+                if ((document.activeElement !== item) && (++frames < MENU_FOCUS_MAX_FRAMES))
+                    window.requestAnimationFrame(attempt);
+            };
+            window.requestAnimationFrame(attempt);
         }
 
         setupKeyboardNavigation() {
