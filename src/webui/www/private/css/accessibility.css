@@ -48,6 +48,19 @@
     left: auto;
 }
 
+/* Layout.css parks closed dropdowns at left:-999em, which keeps every item
+   of every closed menu in the screen-reader buffer. Hide them from assistive
+   technology as well; whatever opens a menu (hover, keyboard) shows only the
+   dropdown it directly owns, so deeper levels stay hidden until opened. */
+#desktopNavbar li ul {
+    visibility: hidden;
+}
+
+#desktopNavbar li:hover > ul,
+#desktopNavbar li.a11y-open > ul {
+    visibility: visible;
+}
+
 /* Keyboard-opened context-menu submenus:
    mirror `.contextMenu li:not(.disabled):hover > ul` */
 .contextMenu li:not(.disabled):focus-within > ul {
@@ -111,4 +124,51 @@
     cursor: pointer;
     padding: 0 4px;
     vertical-align: middle;
+}
+
+/* Filter sidebar: section toggles and listbox options take keyboard focus */
+.filterTitle:focus-visible,
+ul.filterList li:focus-visible > .link {
+    outline: 2px solid var(--a11y-focus-color, #1a66cc) !important;
+    outline-offset: -2px;
+}
+
+/* the ring goes on the option's own row, not around its subcategories */
+ul.filterList li:focus-visible {
+    outline: none !important;
+}
+
+/* selection follows focus, so the focused option is usually the selected
+   one; a blue ring vanishes on the blue selection, use white inside it */
+ul.filterList li.selectedFilter:focus-visible > .link {
+    outline-color: var(--color-text-white, #fff) !important;
+    outline-offset: -4px;
+}
+
+/* Regex toggle: style.css hides the checkbox with display:none and draws its
+   label as the button, which left it unreachable from the keyboard. Keep the
+   checkbox visually hidden but focusable, and ring the label it drives. */
+#torrentsFilterRegexBox {
+    border: 0;
+    clip-path: inset(50%);
+    display: inline-block;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    padding: 0;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
+}
+
+#torrentsFilterRegexBox:focus-visible + label {
+    outline: 2px solid var(--a11y-focus-color, #1a66cc);
+    outline-offset: 1px;
+}
+
+/* status bar controls and the details panel toggle */
+#alternativeSpeedLimits:focus-visible,
+#propertiesPanel_collapseToggle:focus-visible {
+    outline: 2px solid var(--a11y-focus-color, #1a66cc) !important;
+    outline-offset: 1px;
 }

@@ -18,14 +18,26 @@ window.qBittorrent.Accessibility ??= (() => {
             setup: setup,
             announce: announce,
             announceSelectionAction: announceSelectionAction,
+            openContextMenuAt: openContextMenuAt,
         };
     };
 
     const PANEL_POLL_INTERVAL_MS = 250;
     const PANEL_POLL_MAX_TRIES = 60;
     const DIALOG_FOCUS_RETRY_MS = [100, 400, 900];
+    // the region is emptied first so a repeated message is re-announced
+    const ANNOUNCE_DELAY_MS = 50;
+    // stale messages would otherwise sit at the end of the page in browse mode
+    const ANNOUNCEMENT_CLEAR_MS = 5000;
+    const FILTER_LIST_IDS = ["statusFilterList", "categoryFilterList", "tagFilterList", "trackerFilterList"];
+    const FILTER_PAGE_STEP = 10;
+    const TYPEAHEAD_RESET_MS = 700;
+    // an icon's alt only counts as a duplicate of short control text
+    const REDUNDANT_ALT_MAX_TEXT = 80;
 
     let liveRegion = null;
+    let announceTimer = -1;
+    let clearTimer = -1;
 
     /* ---------- live region ---------- */
 
@@ -40,11 +52,16 @@ window.qBittorrent.Accessibility ??= (() => {
     const announce = (message) => {
         if ((liveRegion === null) || !message)
             return;
+        window.clearTimeout(announceTimer);
+        window.clearTimeout(clearTimer);
         // clear first so an identical consecutive message is re-announced
         liveRegion.textContent = "";
-        window.setTimeout(() => {
+        announceTimer = window.setTimeout(() => {
             liveRegion.textContent = message;
-        }, 50);
+            clearTimer = window.setTimeout(() => {
+                liveRegion.textContent = "";
+            }, ANNOUNCEMENT_CLEAR_MS);
+        }, ANNOUNCE_DELAY_MS);
     };
 
     const announceSelectionAction = (verb) => {
@@ -114,6 +131,8 @@ window.qBittorrent.Accessibility ??= (() => {
             button.tabIndex = 0;
             button.setAttribute("aria-label", img.title || img.alt);
             img.alt = "";
+            // the title keeps the image in the tree; the button already says it
+            img.setAttribute("aria-hidden", "true");
         }
 
         // "Add Torrent File" is a <label> wrapping a hidden file input
@@ -123,8 +142,10 @@ window.qBittorrent.Accessibility ??= (() => {
             uploadLabel.setAttribute("role", "button");
             uploadLabel.tabIndex = 0;
             uploadLabel.setAttribute("aria-label", img?.title || img?.alt || "");
-            if (img !== null)
+            if (img !== null) {
                 img.alt = "";
+                img.setAttribute("aria-hidden", "true");
+            }
         }
 
         toolbar.addEventListener("keydown", (e) => {
@@ -276,6 +297,9 @@ window.qBittorrent.Accessibility ??= (() => {
                     break;
                 case "Tab":
                     closeAll();
+                    // the item is about to become visibility:hidden; continue
+                    // the Tab sequence from the trigger instead of from it
+                    focusTrigger(Math.max(topItems.indexOf(li), 0));
                     break;
             }
         });
@@ -299,6 +323,7 @@ window.qBittorrent.Accessibility ??= (() => {
             const sync = () => {
                 for (const a of list.querySelectorAll("li > a")) {
                     const selected = a.closest("li").classList.contains("selected");
+                    a.closest("li").setAttribute("role", "none");
                     a.setAttribute("role", "tab");
                     a.setAttribute("aria-selected", selected ? "true" : "false");
                     a.tabIndex = selected ? 0 : -1;
@@ -483,6 +508,405 @@ window.qBittorrent.Accessibility ??= (() => {
         });
     };
 
+    /* ---------- shared helpers ---------- */
+
+    const setHidden = (element, hidden) => {
+        if (element === null)
+            return;
+        if (hidden)
+            element.setAttribute("aria-hidden", "true");
+        else
+            element.removeAttribute("aria-hidden");
+    };
+
+    const isRendered = (element) => element.getClientRects().length > 0;
+
+    // context menus open on a "contextmenu" event at the pointer position;
+    // synthesise one over the element for the ContextMenu key / Shift+F10
+    const openContextMenuAt = (element) => {
+        const rect = element.getBoundingClientRect();
+        element.dispatchEvent(new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            clientX: rect.left + Math.min(40, (rect.width / 2)),
+            clientY: rect.top + (rect.height / 2),
+        }));
+    };
+
+    /* ---------- filter sidebar ---------- */
+
+    // Each filter section becomes a toggle button plus a single-select
+    // listbox. NVDA's browse mode renders a listbox as just its selected
+    // option, so the four sections read as eight lines instead of a hundred,
+    // and the filters become operable from the keyboard.
+
+    const optionLabel = (li) => (li.getAttribute("aria-label") ?? li.textContent).trim();
+
+    const categoryOptionLabel = (li) => {
+        const text = (li.querySelector(":scope > .link > span")?.textContent ?? li.textContent).trim();
+        let label = text;
+        // subcategories show only their last path segment; say the full path
+        if (li.id.includes("/")) {
+            const leaf = li.id.split("/").at(-1);
+            if (text.startsWith(leaf))
+                label = li.id + text.slice(leaf.length);
+        }
+        if (li.querySelector(":scope > ul") !== null) {
+            const collapsed = li.classList.contains("collapsedCategory");
+            label += collapsed ? ", collapsed" : ", expanded";
+            if (collapsed && (li.querySelector(":scope > ul li.selectedFilter") !== null))
+                label += ", contains the selected category";
+        }
+        return label;
+    };
+
+    const visibleFilterOptions = (list) => [...list.querySelectorAll("li[role=\"option\"]")].filter(isRendered);
+
+    const syncFilterListbox = (list, title) => {
+        title.setAttribute("aria-expanded", list.classList.contains("invisible") ? "false" : "true");
+
+        let selected = null;
+        for (const li of list.querySelectorAll("li")) {
+            li.setAttribute("role", "option");
+            const isSelected = li.classList.contains("selectedFilter");
+            li.setAttribute("aria-selected", isSelected ? "true" : "false");
+            if (isSelected)
+                selected = li;
+            // status icons repeat the text beside them
+            for (const img of li.querySelectorAll(":scope > .link > img"))
+                img.alt = "";
+            // Left/Right expand and collapse instead of this pointer-only button
+            const toggle = li.querySelector(":scope > .link > .categoryToggle");
+            if (toggle !== null) {
+                toggle.setAttribute("aria-hidden", "true");
+                toggle.tabIndex = -1;
+            }
+            li.querySelector(":scope > ul")?.setAttribute("role", "none");
+            if (list.id === "categoryFilterList")
+                li.setAttribute("aria-label", categoryOptionLabel(li));
+        }
+
+        const visible = visibleFilterOptions(list);
+        // a selected subcategory hidden by a collapsed parent hands the tab
+        // stop to its nearest visible ancestor, which says what it contains
+        let stop = selected;
+        while ((stop !== null) && !isRendered(stop))
+            stop = stop.parentElement?.closest("li[role=\"option\"]") ?? null;
+        stop ??= visible[0] ?? null;
+        for (const li of list.querySelectorAll("li"))
+            li.tabIndex = (li === stop) ? 0 : -1;
+
+        // nested category lists would otherwise number each level separately
+        for (const [i, li] of visible.entries()) {
+            li.setAttribute("aria-posinset", i + 1);
+            li.setAttribute("aria-setsize", visible.length);
+        }
+    };
+
+    const chooseFilterOption = (option) => {
+        // reuse the sidebar's own click handling (Filters_pad listener)
+        if (!option.classList.contains("selectedFilter"))
+            option.querySelector(":scope > .link")?.click();
+        option.focus();
+        option.querySelector(":scope > .link")?.scrollIntoView({ block: "nearest" });
+    };
+
+    const makeFilterListbox = (list) => {
+        const title = list.previousElementSibling;
+        if ((title === null) || !title.classList.contains("filterTitle"))
+            return;
+
+        title.id = `a11y-${list.id}-title`;
+        title.setAttribute("role", "button");
+        title.tabIndex = 0;
+        // the title is styled text-transform: uppercase, which Chromium copies
+        // into the accessible name ("STATUS"); name it from the source text
+        title.setAttribute("aria-label", title.textContent.trim());
+        title.setAttribute("aria-controls", list.id);
+        // the arrow only shows the expanded state, which aria-expanded carries
+        const arrow = title.querySelector("img");
+        if (arrow !== null)
+            arrow.alt = "";
+        title.addEventListener("keydown", (e) => {
+            if ((e.key !== "Enter") && (e.key !== " "))
+                return;
+            e.preventDefault();
+            title.click();
+        });
+
+        list.setAttribute("role", "listbox");
+        list.setAttribute("aria-labelledby", title.id);
+
+        // client.js rebuilds the category/tag/tracker lists wholesale when
+        // their contents change; put focus back on the same entry if it was
+        // lost with the old elements
+        let listHasFocus = false;
+        let lastFocusedId = null;
+        list.addEventListener("focusin", (e) => {
+            const li = e.target.closest("li[role=\"option\"]");
+            if (li === null)
+                return;
+            listHasFocus = true;
+            lastFocusedId = li.id;
+        });
+        list.addEventListener("focusout", (e) => {
+            if ((e.relatedTarget !== null) && list.contains(e.relatedTarget))
+                return;
+            const target = e.target;
+            // a focused option removed by a rebuild is not the user leaving
+            queueMicrotask(() => {
+                if (target.isConnected)
+                    listHasFocus = false;
+            });
+        });
+
+        const sync = () => syncFilterListbox(list, title);
+        sync();
+        new MutationObserver((mutations) => {
+            sync();
+            const rebuilt = mutations.some((mutation) => mutation.type === "childList");
+            if (!rebuilt || !listHasFocus || list.contains(document.activeElement))
+                return;
+            const options = [...list.querySelectorAll("li[role=\"option\"]")];
+            const replacement = options.find((li) => (li.id === lastFocusedId) && isRendered(li))
+                ?? list.querySelector("li[tabindex=\"0\"]");
+            replacement?.focus({ preventScroll: true });
+        }).observe(list, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+
+        let typeahead = "";
+        let typeaheadTimer = -1;
+
+        list.addEventListener("keydown", (e) => {
+            const li = e.target.closest("li[role=\"option\"]");
+            if ((li === null) || !list.contains(li))
+                return;
+            const visible = visibleFilterOptions(list);
+            const index = visible.indexOf(li);
+            const last = visible.length - 1;
+            let target = null;
+
+            switch (e.key) {
+                case "ArrowDown":
+                    target = visible[Math.min(index + 1, last)];
+                    break;
+                case "ArrowUp":
+                    target = visible[Math.max(index - 1, 0)];
+                    break;
+                case "Home":
+                    target = visible[0];
+                    break;
+                case "End":
+                    target = visible[last];
+                    break;
+                case "PageDown":
+                    target = visible[Math.min(index + FILTER_PAGE_STEP, last)];
+                    break;
+                case "PageUp":
+                    target = visible[Math.max(index - FILTER_PAGE_STEP, 0)];
+                    break;
+                case "ArrowRight":
+                case "ArrowLeft": {
+                    const toggle = li.querySelector(":scope > .link > .categoryToggle");
+                    const hasChildren = li.querySelector(":scope > ul") !== null;
+                    const collapsed = li.classList.contains("collapsedCategory");
+                    if ((toggle !== null) && hasChildren && (collapsed === (e.key === "ArrowRight"))) {
+                        e.preventDefault();
+                        toggle.click();
+                    }
+                    else if (e.key === "ArrowLeft") {
+                        target = li.parentElement?.closest("li[role=\"option\"]") ?? null;
+                    }
+                    break;
+                }
+                case "Enter":
+                case " ":
+                    target = li;
+                    break;
+                case "ContextMenu":
+                    e.preventDefault();
+                    openContextMenuAt(li);
+                    return;
+                case "F10":
+                    if (e.shiftKey) {
+                        e.preventDefault();
+                        openContextMenuAt(li);
+                    }
+                    return;
+                default:
+                    if ((e.key.length === 1) && !e.ctrlKey && !e.altKey && !e.metaKey && (e.key !== " ")) {
+                        window.clearTimeout(typeaheadTimer);
+                        typeahead += e.key.toLowerCase();
+                        typeaheadTimer = window.setTimeout(() => {
+                            typeahead = "";
+                        }, TYPEAHEAD_RESET_MS);
+                        // a repeated single letter cycles through its matches
+                        const query = ((typeahead.length > 1) && [...typeahead].every((c) => c === typeahead[0])) ? typeahead[0] : typeahead;
+                        const start = (query.length === 1) ? index + 1 : index;
+                        const ordered = [...visible.slice(start), ...visible.slice(0, start)];
+                        target = ordered.find((option) => optionLabel(option).toLowerCase().startsWith(query)) ?? null;
+                    }
+                    break;
+            }
+
+            if (target === undefined || target === null)
+                return;
+            e.preventDefault();
+            chooseFilterOption(target);
+        });
+    };
+
+    const setupFilterListboxes = () => {
+        // the last list in filters.html; all four exist once it does
+        applyWhenPresent("trackerFilterList", () => {
+            for (const id of FILTER_LIST_IDS) {
+                const list = document.getElementById(id);
+                if (list !== null)
+                    makeFilterListbox(list);
+            }
+        });
+    };
+
+    /* ---------- torrent details panel ---------- */
+
+    // The General tab is two layout tables of label/value cells that are all
+    // empty until a torrent is selected. Read it as label/value lines and
+    // leave out every label that has nothing next to it.
+    const syncGeneralTab = (general) => {
+        for (const label of general.querySelectorAll("td.generalLabel")) {
+            const value = label.nextElementSibling;
+            const empty = (value === null) || (value.textContent.trim() === "");
+            setHidden(label, empty);
+            setHidden(value, empty);
+        }
+        for (const fieldset of general.querySelectorAll("fieldset")) {
+            const anyValue = [...fieldset.querySelectorAll("td.generalLabel")]
+                .some((label) => label.getAttribute("aria-hidden") !== "true");
+            setHidden(fieldset, !anyValue);
+        }
+        // the bars are canvases; the percentage next to them carries the value
+        for (const [labelSelector, valueId] of [["#propBarsWrapper > .propBarLabel", "progressPercentage"], ["#propAvailabilityWrapper > .propBarLabel", "averageAvailability"]]) {
+            const value = document.getElementById(valueId);
+            setHidden(general.querySelector(labelSelector), (value === null) || (value.textContent.trim() === ""));
+        }
+    };
+
+    const setupDetailsPanel = () => {
+        applyWhenPresent("propGeneral", (general) => {
+            for (const table of general.querySelectorAll("table"))
+                table.setAttribute("role", "presentation");
+            setHidden(general.querySelector("hr"), true);
+            syncGeneralTab(general);
+            new MutationObserver(() => syncGeneralTab(general))
+                .observe(general, { childList: true, characterData: true, subtree: true });
+        });
+
+        // the panel's collapse arrow, so the whole details area can be put away
+        // (MochaUI remembers the state)
+        applyWhenPresent("propertiesPanel_collapseToggle", (toggle) => {
+            toggle.setAttribute("role", "button");
+            toggle.tabIndex = 0;
+            toggle.setAttribute("aria-label", "Torrent details");
+            const sync = () => toggle.setAttribute("aria-expanded", toggle.classList.contains("panel-expand") ? "false" : "true");
+            sync();
+            new MutationObserver(sync).observe(toggle, { attributes: true, attributeFilter: ["class"] });
+            toggle.addEventListener("keydown", (e) => {
+                if ((e.key !== "Enter") && (e.key !== " "))
+                    return;
+                e.preventDefault();
+                toggle.click();
+            });
+        });
+    };
+
+    /* ---------- status bar ---------- */
+
+    const setupStatusBar = () => {
+        const footer = document.getElementById("desktopFooter");
+        footer.querySelector("table")?.setAttribute("role", "presentation");
+        for (const separator of footer.querySelectorAll(".statusBarSeparator"))
+            setHidden(separator, true);
+
+        // the speed icons' alt text was "Download speed icon"; say what the figure is
+        for (const [infoId, label] of [["DlInfos", "Download speed:"], ["UpInfos", "Upload speed:"]]) {
+            const info = document.getElementById(infoId);
+            if (info === null)
+                continue;
+            const icon = info.previousElementSibling;
+            if (icon?.tagName === "IMG")
+                icon.alt = "";
+            const prefix = document.createElement("span");
+            prefix.className = "a11y-sr-only";
+            prefix.textContent = `${label} `;
+            info.before(prefix);
+        }
+
+        // alternative speed limits toggle: a clickable image (client.js keeps its alt current)
+        const altSpeed = document.getElementById("alternativeSpeedLimits");
+        if (altSpeed !== null) {
+            altSpeed.setAttribute("role", "button");
+            altSpeed.tabIndex = 0;
+            altSpeed.addEventListener("keydown", (e) => {
+                if ((e.key !== "Enter") && (e.key !== " "))
+                    return;
+                e.preventDefault();
+                altSpeed.click();
+            });
+        }
+    };
+
+    /* ---------- torrent filter toolbar ---------- */
+
+    const setupFilterToolbar = () => {
+        // the regex checkbox is now focusable (accessibility.css); its label
+        // is a drawn button, so name the checkbox and keep the label silent
+        const regexBox = document.getElementById("torrentsFilterRegexBox");
+        const regexLabel = document.querySelector("label[for=\"torrentsFilterRegexBox\"]");
+        if ((regexBox !== null) && (regexLabel !== null)) {
+            regexBox.setAttribute("aria-label", regexLabel.getAttribute("aria-label") ?? "Use regular expression");
+            setHidden(regexLabel, true);
+        }
+
+        // "Filter by:" was read as text and again as the select's name
+        const select = document.getElementById("torrentsFilterSelect");
+        const selectLabel = document.querySelector("label[for=\"torrentsFilterSelect\"]");
+        if ((select !== null) && (selectLabel !== null)) {
+            select.setAttribute("aria-label", selectLabel.textContent.trim().replace(/:$/, ""));
+            setHidden(selectLabel, true);
+        }
+    };
+
+    /* ---------- redundant image text ---------- */
+
+    // An icon whose alt repeats the text beside it is read twice ("General
+    // General", "SearchSearch"). Empty such alts now and in panels that
+    // MochaUI loads later.
+    const REDUNDANT_ALT_PARENTS = new Set(["A", "BUTTON", "LABEL", "LI", "SPAN"]);
+
+    const stripRedundantAlt = (root) => {
+        const images = (root.tagName === "IMG") ? [root] : root.querySelectorAll("img[alt]");
+        for (const img of images) {
+            const alt = img.getAttribute("alt")?.trim().toLowerCase();
+            const parent = img.parentElement;
+            if (!alt || (parent === null) || !REDUNDANT_ALT_PARENTS.has(parent.tagName))
+                continue;
+            const text = parent.textContent.trim().toLowerCase();
+            if ((text !== "") && (text.length <= REDUNDANT_ALT_MAX_TEXT) && text.includes(alt))
+                img.alt = "";
+        }
+    };
+
+    const setupRedundantAltCleanup = () => {
+        stripRedundantAlt(document.body);
+        new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                for (const node of mutation.addedNodes) {
+                    if (node.nodeType === Node.ELEMENT_NODE)
+                        stripRedundantAlt(node);
+                }
+            }
+        }).observe(document.body, { childList: true, subtree: true });
+    };
+
     /* ---------- entry point ---------- */
 
     const setup = () => {
@@ -498,6 +922,11 @@ window.qBittorrent.Accessibility ??= (() => {
         setupDialogManager();
         setupActionAnnouncements();
         setupSkipLink();
+        setupFilterListboxes();
+        setupDetailsPanel();
+        setupStatusBar();
+        setupFilterToolbar();
+        setupRedundantAltCleanup();
     };
 
     return exports();
