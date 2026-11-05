@@ -1114,9 +1114,17 @@ window.qBittorrent.DynamicTable ??= (() => {
 
         // A sort the user asked for (click, touch, keyboard) is confirmed to
         // screen readers; programmatic sorts while restoring state are not.
+        // Since 5.3.0 the previous sort column breaks ties (rowComparator),
+        // so the confirmation names it too, under the same test it uses.
         sortByUser(column) {
             this.setSortedColumn(column);
-            window.qBittorrent.Accessibility?.announce(`Sorted by ${this.columnSpokenName(column)}, ${(this.reverseSort === "1") ? "descending" : "ascending"}`);
+            const directionName = (reverse) => ((reverse === "1") ? "descending" : "ascending");
+            let message = `Sorted by ${this.columnSpokenName(column)}, ${directionName(this.reverseSort)}`;
+            const secondaryName = this.secondarySortedColumn;
+            const hasSecondary = secondaryName && (secondaryName !== this.sortedColumn) && (this.columns[secondaryName] !== undefined);
+            if (hasSecondary)
+                message += `, then by ${this.columnSpokenName(secondaryName)}, ${directionName(this.secondaryReverseSort)}`;
+            window.qBittorrent.Accessibility?.announce(message);
         }
 
         rowComparator() {
