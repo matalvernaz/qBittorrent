@@ -155,15 +155,20 @@ window.qBittorrent.DynamicTable ??= (() => {
                 }
             });
             this.dynamicTableDiv.addEventListener("focusout", (e) => {
-                if ((e.relatedTarget !== null) && this.dynamicTableDiv.contains(e.relatedTarget))
+                // Only leaving the rows counts. Since 5.3.0 the column header
+                // sits inside dynamicTableDiv too, and moving to it is leaving.
+                if (!this.tableBody.contains(e.target))
+                    return;
+                if ((e.relatedTarget !== null) && this.tableBody.contains(e.relatedTarget))
                     return;
                 const target = e.target;
+                // read now: focusin on the header clears it before the check below
+                const focusedRowId = this.a11yFocusedRowId;
                 // decide after the current task: a focused row detached by a
                 // re-render is not the user leaving (the render path refocuses)
                 queueMicrotask(() => {
-                    if (!target.isConnected || this.dynamicTableDiv.contains(document.activeElement))
+                    if (!target.isConnected || this.tableBody.contains(document.activeElement))
                         return;
-                    const focusedRowId = this.a11yFocusedRowId;
                     this.a11yFocusedRowId = null;
                     // bring the row's label up to date now that it is no longer read out
                     const tr = target.closest("tr");
@@ -209,6 +214,19 @@ window.qBittorrent.DynamicTable ??= (() => {
                 this.applyRowAriaLabel(tr, row);
         }
 
+        // Since 5.3.0 the column header sits inside dynamicTableDiv, so its
+        // events reach the row handlers in setupCommonEvents. Those act on
+        // rows only; the header has its own (setupHeaderEvents).
+        isInColumnHeader(element) {
+            return this.fixedTableHeader.closest("table").contains(element);
+        }
+
+        // the body row an event happened in, or null
+        getEventRow(e) {
+            const tr = e.target.closest("tr");
+            return ((tr !== null) && this.tableBody.contains(tr)) ? tr : null;
+        }
+
         setupVirtualList() {
             if (!this.useVirtualList)
                 return;
@@ -239,6 +257,9 @@ window.qBittorrent.DynamicTable ??= (() => {
             });
 
             this.dynamicTableDiv.addEventListener("click", (e) => {
+                // sorting by a column header leaves the selection alone
+                if (this.isInColumnHeader(e.target))
+                    return;
                 const tr = e.target.closest("tr");
                 if ((tr === null) || (tr.rowId === undefined)) {
                     // clicking on the table body deselects all rows
@@ -266,7 +287,7 @@ window.qBittorrent.DynamicTable ??= (() => {
             });
 
             this.dynamicTableDiv.addEventListener("contextmenu", (e) => {
-                const tr = e.target.closest("tr");
+                const tr = this.getEventRow(e);
                 if (!tr)
                     return;
 
@@ -277,7 +298,7 @@ window.qBittorrent.DynamicTable ??= (() => {
             }, true);
 
             this.dynamicTableDiv.addEventListener("touchstart", (e) => {
-                const tr = e.target.closest("tr");
+                const tr = this.getEventRow(e);
                 if (!tr)
                     return;
 
@@ -288,7 +309,7 @@ window.qBittorrent.DynamicTable ??= (() => {
             }, { passive: true });
 
             this.dynamicTableDiv.addEventListener("keydown", (e) => {
-                const tr = e.target.closest("tr");
+                const tr = this.getEventRow(e);
                 if (!tr)
                     return;
 
@@ -3602,7 +3623,7 @@ window.qBittorrent.DynamicTable ??= (() => {
         setupCommonEvents() {
             super.setupCommonEvents();
             this.dynamicTableDiv.addEventListener("keydown", (e) => {
-                const tr = e.target.closest("tr");
+                const tr = this.getEventRow(e);
                 if (!tr)
                     return;
 
