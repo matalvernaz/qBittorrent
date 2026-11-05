@@ -79,7 +79,9 @@ window.qBittorrent.DynamicTable ??= (() => {
             this.dynamicTableDivId = dynamicTableDivId;
             this.dynamicTableFixedHeaderDivId = dynamicTableFixedHeaderDivId;
             this.dynamicTableDiv = document.getElementById(dynamicTableDivId);
-            this.useVirtualList = clientData.get("use_virtual_list") ?? true;
+            // Off unless chosen in Options (5.3.0 made it the default): the
+            // screen-reader support here is built and tested on full lists.
+            this.useVirtualList = clientData.get("use_virtual_list") ?? false;
             this.fixedTableHeader = document.querySelector(`#${dynamicTableFixedHeaderDivId} thead tr`);
             // the body table is the direct child; the fixed header table is nested in a child div
             this.table = this.dynamicTableDiv.querySelector(":scope > table");
