@@ -179,6 +179,26 @@ window.qBittorrent.DynamicTable ??= (() => {
                         this.rerender();
                 });
             });
+
+            // Since 5.3.0 the column header is sticky inside the scroll
+            // container and covers the top of it. scroll-padding makes
+            // scrollIntoView() and focus() stop rows below it, not under it
+            // (WCAG 2.4.11); it changes with density and zoom, so follow it.
+            const headerDiv = this.getStickyHeaderDiv();
+            if (headerDiv !== null) {
+                const keepRowsClearOfHeader = () => {
+                    this.dynamicTableDiv.style.scrollPaddingTop = `${headerDiv.offsetHeight}px`;
+                };
+                keepRowsClearOfHeader();
+                new ResizeObserver(keepRowsClearOfHeader).observe(headerDiv);
+            }
+        }
+
+        // the column header's div when it sits inside the scroll container
+        // (sticky, as in 5.3.0), else null
+        getStickyHeaderDiv() {
+            const headerDiv = this.fixedTableHeader.closest(".dynamicTableFixedHeaderDiv");
+            return ((headerDiv !== null) && this.dynamicTableDiv.contains(headerDiv)) ? headerDiv : null;
         }
 
         // NVDA speaks every name change of the focused element, so while a row
@@ -1701,11 +1721,17 @@ window.qBittorrent.DynamicTable ??= (() => {
                 return null;
             if (this.useVirtualList) {
                 const div = this.dynamicTableDiv;
+                // Row offsets count from the top of the body table, which
+                // starts below the sticky header. The header covers the top of
+                // the visible area, so the top test needs no correction, but a
+                // row's bottom sits headerHeight further down than its offset.
+                const headerHeight = this.getStickyHeaderDiv()?.offsetHeight ?? 0;
                 const top = index * this.rowHeight;
+                const bottom = headerHeight + top + this.rowHeight;
                 if (top < div.scrollTop)
                     div.scrollTop = top;
-                else if ((top + this.rowHeight) > (div.scrollTop + div.clientHeight))
-                    div.scrollTop = (top + this.rowHeight) - div.clientHeight;
+                else if (bottom > (div.scrollTop + div.clientHeight))
+                    div.scrollTop = bottom - div.clientHeight;
                 this.renderedOffset = div.scrollTop;
                 this.rerender(rows);
             }
